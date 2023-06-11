@@ -3,40 +3,51 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use egui::{Align, Color32, RichText, Ui};
+use egui::{Color32, RichText, Ui};
 use egui_dock::{DockArea, NodeIndex, TabViewer, Tree};
-use egui_extras::{Column, TableBuilder, TableRow};
+use egui_extras::{Column, TableBuilder};
 use json::JsonValue;
-use log::debug;
 
-use super::log_file_reader::LogFileReader;
-use super::search_window::SearchWindow;
+use super::{log_entries_table::LogEntriesTable, search_window::SearchWindow};
+use super::{log_file_reader::LogFileReader, search_window::SearchOptions};
+
+struct FilteredLogEntriesTabState {
+    search_term: String,
+    matched_line_nums: Vec<u64>,
+    search_options: SearchOptions,
+}
+
+impl PartialEq for FilteredLogEntriesTabState {
+    fn eq(&self, other: &Self) -> bool {
+        return self == other;
+    }
+}
 
 #[derive(PartialEq)]
 enum LogViewTab {
     LogEntries,
     LogEntryContext,
-    FilteredLogEntries(String, Vec<u64>),
+    FilteredLogEntries(FilteredLogEntriesTabState),
 }
 
 pub struct LogView {
     tree: Tree<LogViewTab>,
-    lines_view: LogLinesView,
+    log_view_context: LogViewContext,
     file_path: PathBuf,
 }
 
-struct LogLinesView {
+struct LogViewContext {
     log_file_path: PathBuf,
     log_file_reader: LogFileReader,
     status_text: RichText,
     selected_line_num: Option<u64>,
     selected_log_entry: Option<JsonValue>,
+    selected_line_changed: bool,
     search_window: SearchWindow,
     tabs_to_open: Vec<(LogViewTab, NodeIndex)>,
-    selected_line_changed: Option<u64>,
 }
 
-impl TabViewer for LogLinesView {
+impl TabViewer for LogViewContext {
     type Tab = LogViewTab;
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
@@ -45,7 +56,7 @@ impl TabViewer for LogLinesView {
             LogViewTab::LogEntryContext => {
                 self.ui_entry_context(ui);
             }
-            LogViewTab::FilteredLogEntries(_, ref entries) => self.ui_filtered_entries(ui, entries),
+            LogViewTab::FilteredLogEntries(ref mut state) => self.ui_filtered_entries(ui, state),
         }
     }
 
@@ -53,8 +64,8 @@ impl TabViewer for LogLinesView {
         match tab {
             LogViewTab::LogEntries => "Log".into(),
             LogViewTab::LogEntryContext => "Context".into(),
-            LogViewTab::FilteredLogEntries(ref search_term, _) => {
-                format!("Search '{}'", search_term).into()
+            LogViewTab::FilteredLogEntries(ref state) => {
+                format!("Search '{}'", state.search_term).into()
             }
         }
     }
@@ -79,7 +90,7 @@ impl LogView {
         Ok(LogView {
             tree,
             file_path: file_path.to_owned(),
-            lines_view: LogLinesView::open(file_path)?,
+            log_view_context: LogViewContext::open(file_path)?,
         })
     }
 
@@ -92,9 +103,12 @@ impl LogView {
             .show_add_buttons(true)
             .show_add_popup(true)
             .scroll_area_in_tabs(false)
-            .show_inside(ui, &mut self.lines_view);
+            .show_inside(ui, &mut self.log_view_context);
 
-        for (tab_type, destination_node) in self.lines_view.tabs_to_open.drain(..) {
+        self.log_view_context.selected_line_changed = false;
+        self.log_view_context.ui_search(ui);
+
+        for (tab_type, destination_node) in self.log_view_context.tabs_to_open.drain(..) {
             match self.tree.find_tab(&tab_type) {
                 Some((existing_tab_node_index, _)) => {
                     self.tree.set_focused_node(existing_tab_node_index);
@@ -108,21 +122,21 @@ impl LogView {
     }
 
     pub fn open_search(&mut self) {
-        self.lines_view.open_search()
+        self.log_view_context.open_search()
     }
 }
 
-impl LogLinesView {
+impl LogViewContext {
     pub fn open(filepath: &Path) -> io::Result<Self> {
-        let mut log_view = LogLinesView {
+        let mut log_view = LogViewContext {
             log_file_path: filepath.to_owned(),
             log_file_reader: LogFileReader::open(filepath)?,
             status_text: RichText::new(""),
             search_window: SearchWindow::new(),
             selected_line_num: None,
             selected_log_entry: None,
+            selected_line_changed: false,
             tabs_to_open: vec![],
-            selected_line_changed: None,
         };
         match log_view.log_file_reader.load() {
             Ok(line_count) => {
@@ -137,41 +151,7 @@ impl LogLinesView {
         Ok(log_view)
     }
 
-    fn ui_entries(self: &mut Self, ui: &mut Ui) {
-        let line_count = self.log_file_reader.line_count();
-
-        let mut table_builder = TableBuilder::new(ui)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto())
-            .column(Column::initial(150.0).resizable(true).clip(true))
-            .column(Column::remainder().clip(true));
-
-        if self.search_window.selection_changed() {
-            let row_idx = self.selected_line_num.unwrap_or(0);
-            debug!("Scrolling to row {}", row_idx);
-            table_builder = table_builder.scroll_to_row(row_idx as usize, Some(Align::Center));
-        }
-
-        table_builder
-            .header(18.0, |mut row| {
-                row.col(|ui| {
-                    ui.label("Time");
-                });
-                row.col(|ui| {
-                    ui.label("Tag");
-                });
-                row.col(|ui| {
-                    ui.label("Message");
-                });
-            })
-            .body(|body| {
-                body.rows(16.0, line_count as usize, |row_idx, mut row| {
-                    self.show_logline(&mut row, row_idx);
-                });
-            });
-
-        ui.allocate_space(ui.available_size());
-
+    fn ui_search(&mut self, ui: &mut Ui) {
         self.search_window.show(ui.ctx(), &self.log_file_path);
 
         if self.search_window.selection_changed() {
@@ -179,52 +159,36 @@ impl LogLinesView {
         }
 
         if self.search_window.wants_open_results() {
+            let dest_index = NodeIndex::root().right();
+
             self.tabs_to_open.push((
-                LogViewTab::FilteredLogEntries(
-                    self.search_window.search_term().to_owned(),
-                    self.search_window.search_results().to_owned(),
-                ),
-                NodeIndex::root(),
+                LogViewTab::FilteredLogEntries(FilteredLogEntriesTabState {
+                    search_term: self.search_window.search_term().to_owned(),
+                    matched_line_nums: self.search_window.search_results().to_owned(),
+                    search_options: Default::default(),
+                }),
+                dest_index,
             ));
         }
     }
 
-    fn ui_filtered_entries(self: &mut Self, ui: &mut Ui, lines: &[u64]) {
-        let line_count = lines.len();
-        // let line_count = self.search_window.search_result_count();
+    fn ui_entries(self: &mut Self, ui: &mut Ui) {
+        LogEntriesTable::new(&mut self.log_file_reader)
+            .selected_line_num(self.selected_line_num)
+            .ui(ui);
 
-        let mut table_builder = TableBuilder::new(ui)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto())
-            .column(Column::initial(150.0).resizable(true).clip(true))
-            .column(Column::remainder().clip(true));
+        // if self.selected_line_changed {
+        //     let row_idx = self.selected_line_num.unwrap_or(0);
+        //     debug!("Scrolling to row {}", row_idx);
+        //     table_builder = table_builder.scroll_to_row(row_idx as usize, Some(Align::Center));
+        // }
+    }
 
-        if self.search_window.selection_changed() {
-            let row_idx = self.selected_line_num.unwrap_or(0);
-            debug!("Scrolling to row {}", row_idx);
-            table_builder = table_builder.scroll_to_row(row_idx as usize, Some(Align::Center));
-        }
-
-        table_builder
-            .header(18.0, |mut row| {
-                row.col(|ui| {
-                    ui.label("Time");
-                });
-                row.col(|ui| {
-                    ui.label("Tag");
-                });
-                row.col(|ui| {
-                    ui.label("Message");
-                });
-            })
-            .body(|body| {
-                body.rows(16.0, line_count, |row_idx, mut row| {
-                    let line_number = lines[row_idx];
-                    self.show_logline(&mut row, line_number as usize);
-                });
-            });
-
-        ui.allocate_space(ui.available_size());
+    fn ui_filtered_entries(&mut self, ui: &mut Ui, state: &mut FilteredLogEntriesTabState) {
+        LogEntriesTable::new(&mut self.log_file_reader)
+            .filtered_lines(&state.matched_line_nums)
+            .selected_line_num(self.selected_line_num)
+            .ui(ui);
     }
 
     fn ui_entry_context(&self, ui: &mut Ui) -> Option<()> {
@@ -260,76 +224,9 @@ impl LogLinesView {
         self.search_window.open();
     }
 
-    fn show_logline(self: &mut Self, row: &mut TableRow<'_, '_>, row_idx: usize) -> Option<()> {
-        let line = self.log_file_reader.line(row_idx as u64)?;
-        match parse_logline(&line) {
-            Some((time, log_entry)) => {
-                row.col(|ui| {
-                    ui.label(RichText::new(time).color(Color32::WHITE).monospace());
-                });
-                row.col(|ui| {
-                    let tag = log_entry["tag"].as_str().unwrap_or_default();
-                    ui.label(RichText::new(tag).color(Color32::KHAKI).monospace());
-                });
-                row.col(|ui| {
-                    let full_msg = log_entry["message"].as_str().unwrap_or_default().trim();
-                    let msg = if let Some(m) = full_msg.split_once('\n') {
-                        m.0
-                    } else {
-                        full_msg
-                    };
-                    let level = log_entry["level"].as_str().unwrap_or("FATAL");
-
-                    if ui
-                        .selectable_label(
-                            self.selected_line_num == Some(row_idx as u64),
-                            RichText::new(msg.trim())
-                                .color(color_from_loglevel(level))
-                                .monospace(),
-                        )
-                        .clicked()
-                    {
-                        self.select_row(Some(row_idx as u64), Some(log_entry));
-                    }
-                });
-            }
-            None => {
-                row.col(|_| {});
-                row.col(|_| {});
-                row.col(|ui| {
-                    ui.label(line.trim());
-                });
-            }
-        }
-
-        Some(())
-    }
-
-    fn select_row(&mut self, row_idx: Option<u64>, log_entry: Option<JsonValue>) {
-        self.selected_line_num = row_idx;
+    fn select_row(&mut self, line_num: Option<u64>, log_entry: Option<JsonValue>) {
+        self.selected_line_num = line_num;
         self.selected_log_entry = log_entry;
-    }
-}
-
-fn parse_logline(line: &str) -> Option<(&str, JsonValue)> {
-    let split_idx = line.find(' ')?;
-    let (timestamp, json_content) = line.split_at(split_idx);
-    let log_entry = json::parse(json_content).ok()?;
-
-    if log_entry.is_object() {
-        Some((timestamp, log_entry))
-    } else {
-        None
-    }
-}
-
-fn color_from_loglevel(level: &str) -> Color32 {
-    match level {
-        "ERROR" => Color32::LIGHT_RED,
-        "WARNING" => Color32::GOLD,
-        "INFO" => Color32::LIGHT_GREEN,
-        "DEBUG" => Color32::LIGHT_BLUE,
-        "FATAL" => Color32::RED,
-        _ => Color32::DEBUG_COLOR,
+        self.selected_line_changed = true;
     }
 }

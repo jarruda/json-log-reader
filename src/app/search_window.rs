@@ -1,9 +1,9 @@
-use std::{path::Path, fs::File, slice::{self, Iter}};
+use std::{fs::File, path::Path};
 
 use grep::searcher::{sinks::Lossy, Searcher};
 use grep_regex::RegexMatcherBuilder;
 
-use log::{error};
+use log::error;
 
 pub struct SearchWindow {
     search_text: String,
@@ -15,10 +15,20 @@ pub struct SearchWindow {
     wants_open_results: bool,
 }
 
-struct SearchOptions {
+pub struct SearchOptions {
     case_sensitive: bool,
     whole_word: bool,
     regex: bool,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            case_sensitive: false,
+            whole_word: false,
+            regex: false,
+        }
+    }
 }
 
 impl SearchWindow {
@@ -34,7 +44,7 @@ impl SearchWindow {
                 whole_word: false,
                 regex: false,
             },
-            wants_open_results: false
+            wants_open_results: false,
         }
     }
 
@@ -45,7 +55,7 @@ impl SearchWindow {
     pub fn show(&mut self, ctx: &egui::Context, path: &Path) -> &mut Self {
         self.selection_changed = false;
         self.wants_open_results = false;
-        
+
         let mut trigger_search = false;
         let mut is_open = self.is_open;
 
@@ -214,13 +224,6 @@ impl SearchWindow {
 
     pub fn search_result_count(&self) -> usize {
         self.search_results.len()
-    }
-
-    pub fn search_result_line(&self, index: usize) -> Option<u64> {
-        match self.search_results.get(index) {
-            Some(line) => Some(*line),
-            None => None,
-        }
     }
 
     pub fn search_term(&self) -> &str {

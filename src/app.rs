@@ -1,4 +1,5 @@
 pub mod log_file_reader;
+pub mod log_entries_table;
 pub mod log_view;
 pub mod search_window;
 
