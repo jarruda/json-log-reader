@@ -34,7 +34,7 @@ impl egui_dock::TabViewer for LogViewTabViewer {
 pub struct TemplateApp {
     #[serde(skip)]
     tree: Tree<LogView>,
-    
+
     recent_files: Vec<PathBuf>,
 }
 
@@ -93,11 +93,10 @@ impl TemplateApp {
             .filter(|s| s.1.is_some())
             .map(|s| (s.0, s.1.unwrap().to_string_lossy()))
         {
-            
             if ui.button(file.1).clicked() {
                 return Some(file.0.to_path_buf());
             }
-        }   
+        }
         None
     }
 }
@@ -111,7 +110,6 @@ impl eframe::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        #[cfg(not(target_arch = "wasm32"))] // no File->Quit on web pages!
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
             egui::menu::bar(ui, |ui| {
@@ -161,7 +159,7 @@ impl eframe::App for TemplateApp {
                     }
                     ui.label("Recent Files");
                     ui.separator();
-                    
+
                     ui.style_mut().visuals.button_frame = false;
                     if let Some(selected_file) = self.recent_file_menu(ui) {
                         self.open_file(Some(&selected_file));
