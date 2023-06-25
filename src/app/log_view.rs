@@ -6,14 +6,13 @@ use std::{
 use egui::{Color32, RichText, Ui};
 use egui_dock::{DockArea, NodeIndex, TabViewer, Tree};
 
+use super::log_file_reader::LogFileReader;
 use super::{
     filtered_log_entries_tab::FilteredLogEntriesTab,
     log_entries_tab::LogEntriesTab,
     log_entry_context_tab::LogEntryContextTab,
     log_file_reader::{LineNumber, LogEntry},
-    search_window::SearchWindow,
 };
-use super::{log_file_reader::LogFileReader};
 
 #[derive(Default)]
 struct FilteredLogEntriesTabState {}
@@ -59,7 +58,6 @@ struct LogViewContext {
     log_file_path: PathBuf,
     log_file_reader: LogFileReader,
     status_text: RichText,
-    search_window: SearchWindow,
     tabs_to_open: Vec<(Box<dyn LogViewTabTrait>, NodeIndex)>,
     selection_state: LogSelectionState,
 }
@@ -82,25 +80,18 @@ impl TabViewer for LogViewContext {
         ui.set_min_width(100.0);
 
         if ui.button("Log").clicked() {
-            self.tabs_to_open
-                .push((Box::new(LogEntriesTab::new()), node));
+            self.tabs_to_open.push((LogEntriesTab::new(), node));
         }
         if ui.button("Context").clicked() {
-            self.tabs_to_open
-                .push((Box::new(LogEntryContextTab::new()), node));
+            self.tabs_to_open.push((LogEntryContextTab::new(), node));
         }
     }
 }
 
 impl LogView {
     pub fn open(file_path: &Path) -> io::Result<Self> {
-        let mut tree: Tree<Box<dyn LogViewTabTrait>> =
-            Tree::new(vec![Box::new(LogEntriesTab::new())]);
-        tree.split_below(
-            NodeIndex::root(),
-            0.8,
-            vec![Box::new(LogEntryContextTab::new())],
-        );
+        let mut tree: Tree<Box<dyn LogViewTabTrait>> = Tree::new(vec![LogEntriesTab::new()]);
+        tree.split_below(NodeIndex::root(), 0.8, vec![LogEntryContextTab::new()]);
 
         Ok(LogView {
             tree,
@@ -120,8 +111,6 @@ impl LogView {
             .scroll_area_in_tabs(false)
             .show_inside(ui, &mut self.log_view_context);
 
-        self.log_view_context.ui_search(ui);
-
         for (tab_type, destination_node) in self.log_view_context.tabs_to_open.drain(..) {
             self.tree.set_focused_node(destination_node);
             self.tree.push_to_focused_leaf(tab_type);
@@ -139,7 +128,6 @@ impl LogViewContext {
             log_file_path: filepath.to_owned(),
             log_file_reader: LogFileReader::open(filepath)?,
             status_text: Default::default(),
-            search_window: SearchWindow::new(),
             tabs_to_open: vec![],
             selection_state: Default::default(),
         };
@@ -165,27 +153,12 @@ impl LogViewContext {
         }
     }
 
-    fn ui_search(&mut self, ui: &mut Ui) {
-        self.search_window.show(ui.ctx(), &self.log_file_path);
-
-        if self.search_window.selection_changed() {
-            self.set_selection(self.search_window.selected_search_result_line());
-        }
-
-        if self.search_window.wants_open_results() {
-            let dest_index = NodeIndex::root().right();
-
-            self.tabs_to_open.push((
-                Box::new(FilteredLogEntriesTab::new(
-                    self.search_window.search_term().to_owned(),
-                    self.search_window.search_results().to_owned(),
-                )),
-                dest_index,
-            ));
-        }
-    }
-
     pub fn open_search(&mut self) {
-        self.search_window.open();
+        let dest_index = NodeIndex::root().right();
+
+        self.tabs_to_open.push((
+            FilteredLogEntriesTab::new(self.log_file_path.clone()),
+            dest_index,
+        ));
     }
 }

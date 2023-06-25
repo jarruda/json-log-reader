@@ -1,10 +1,9 @@
-pub mod log_file_reader;
-pub mod log_entries_table;
-pub mod log_entries_tab;
 pub mod filtered_log_entries_tab;
+pub mod log_entries_tab;
+pub mod log_entries_table;
 pub mod log_entry_context_tab;
+pub mod log_file_reader;
 pub mod log_view;
-pub mod search_window;
 
 use std::path::{Path, PathBuf};
 

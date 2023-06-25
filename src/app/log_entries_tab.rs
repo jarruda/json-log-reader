@@ -1,8 +1,7 @@
-
 use super::{
     log_entries_table::LogEntriesTable,
     log_file_reader::{LineNumber, LogFileReader},
-    log_view::{LogSelectionState, LogViewTabTrait, LogViewTabResponse},
+    log_view::{LogSelectionState, LogViewTabResponse, LogViewTabTrait},
 };
 
 pub struct LogEntriesTab {
@@ -10,10 +9,10 @@ pub struct LogEntriesTab {
 }
 
 impl LogEntriesTab {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Box<Self> {
+        Box::new(Self {
             selected_line_num: None,
-        }
+        })
     }
 }
 

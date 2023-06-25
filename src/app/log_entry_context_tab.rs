@@ -9,8 +9,8 @@ use super::{
 pub struct LogEntryContextTab {}
 
 impl LogEntryContextTab {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new() -> Box<Self> {
+        Box::new(Self {})
     }
 }
 
