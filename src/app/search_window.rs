@@ -5,10 +5,12 @@ use grep_regex::RegexMatcherBuilder;
 
 use log::error;
 
+use super::log_file_reader::LineNumber;
+
 pub struct SearchWindow {
     search_text: String,
     is_open: bool,
-    search_results: Vec<u64>,
+    search_results: Vec<LineNumber>,
     selected_search_result_row: Option<u64>,
     selection_changed: bool,
     search_options: SearchOptions,
@@ -140,8 +142,8 @@ impl SearchWindow {
 
         if trigger_search {
             match Self::search(&self.search_options, path, &self.search_text) {
-                Some(path) => {
-                    self.search_results = path;
+                Some(results) => {
+                    self.search_results = results;
                     self.selected_search_result_row = if self.search_results.is_empty() {
                         None
                     } else {
@@ -170,7 +172,7 @@ impl SearchWindow {
         }
     }
 
-    fn search(options: &SearchOptions, file_path: &Path, search_text: &str) -> Option<Vec<u64>> {
+    fn search(options: &SearchOptions, file_path: &Path, search_text: &str) -> Option<Vec<LineNumber>> {
         // If regex is turned off, escape the search text to literals.
         let escaped_search_text = if !options.regex {
             Some(regex::escape(search_text))
@@ -194,7 +196,7 @@ impl SearchWindow {
         let mut searcher = Searcher::new();
 
         // Store line numbers of all matches
-        let mut matches: Vec<u64> = vec![];
+        let mut matches: Vec<LineNumber> = vec![];
 
         searcher
             .search_file(
@@ -202,7 +204,7 @@ impl SearchWindow {
                 &File::open(file_path).ok()?,
                 Lossy(|line_num, _line| {
                     let zero_based_line_num = line_num - 1;
-                    matches.push(zero_based_line_num);
+                    matches.push(zero_based_line_num as LineNumber);
                     Ok(true)
                 }),
             )
@@ -215,11 +217,11 @@ impl SearchWindow {
         self.selection_changed
     }
 
-    pub fn selected_search_result_row(&self) -> Option<u64> {
+    pub fn selected_search_result_line(&self) -> Option<LineNumber> {
         let result_line = *self
             .search_results
             .get(self.selected_search_result_row? as usize)?;
-        Some(result_line as u64)
+        Some(result_line)
     }
 
     pub fn search_result_count(&self) -> usize {
@@ -230,7 +232,7 @@ impl SearchWindow {
         &self.search_text
     }
 
-    pub fn search_results(&self) -> &[u64] {
+    pub fn search_results(&self) -> &[LineNumber] {
         &self.search_results
     }
 
