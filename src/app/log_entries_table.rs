@@ -47,6 +47,7 @@ impl<'a> LogEntriesTable<'a> {
         };
 
         let mut table_builder = TableBuilder::new(ui)
+            .max_scroll_height(f32::INFINITY)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::auto())
             .column(Column::initial(150.0).resizable(true).clip(true))

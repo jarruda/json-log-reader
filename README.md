@@ -19,33 +19,33 @@ TODO
 TODO
 
 ## TODO
-* Hotkeys
-* Keyboard navigation (default focus + tab)
-* One-click copy on everything
-* Filter
-    * Show search window results in a filtered log tab
-* Start maximized
 * Follow file (tail)
+* Hotkeys
+* Keyboard navigation
+    * Default focus + tabbing
+    * Up/Down line selection
+    * Page Up/Down scrolling on tables
+* One-click copy on everything
+* Start maximized
 * Highlight matched search terms
-* Time scroll bar
 * Fix status line height
-* Toggle line numbers
+* Toggle line number display
 * Customize columns
     * Add columns that can reference context fields
     * Change column order
+* Customize fonts, color scheme, etc (egui-stylist, others)
+* Time scroll bar
+    * Show a time representation next to the scroll bar a la Google Photos
 * Asynchronous search result streaming
 * Asynchronous file loading (newline counting)
 * Customize file format (timestamp + implicit JSON keys for message, tag, and level)
-* Custom color schemes (egui-stylist, others)
 * Application & Tab Icons: https://crates.io/crates/egui-phosphor & https://phosphoricons.com/
 * Plugin support: Load shared libraries dynamically to gain additional functionality.
 * Remove WASM support, focus on desktop application
     * Easy to restore WASM in future from egui template.
 
 ## Known Issues
-* After searching for something with results, the text can be changed and the 'open results' button used to open a tab with the new text, but old search results
-* Window's "no tabs open" content does not show on startup because Tree:is_empty is not true after creation.  After creating and closing a tab it then returns true.
-* Moving and re-docking tabs is not working correctly.
+* Moving and re-docking tabs is not working correctly - possibly because nested edock::Tree's are used, unknown if supported.
 * After closing either the "Log" or "Context" tabs, an ID conflict occurs between the root tab (for the LogView) and the remaining open tab's close button in the DockArea below it.
-* Log view table does not extend to the bottom of the content area
+* Window's "no tabs open" content does not show on startup because `Tree::is_empty` is not true after creation.  After creating and closing a tab it then returns true.
 * Window flashes on startup before displaying final window
