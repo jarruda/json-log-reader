@@ -41,9 +41,12 @@ TODO
 * Customize file format (timestamp + implicit JSON keys for message, tag, and level)
 * Application & Tab Icons: https://crates.io/crates/egui-phosphor & https://phosphoricons.com/
 * Plugin support: Load shared libraries dynamically to gain additional functionality.
+* Log statistics: tab reporting number of lines, log size, duration of period included, log entry count per severity, etc.
+* CloudWatch Logs: open a log stream like a file
+* Cloudwatch Logs Insights: make insights queries and view results as a log
 
 ## Known Issues
 * Moving and re-docking tabs is not working correctly - possibly because nested edock::Tree's are used, unknown if supported.
 * After closing either the "Log" or "Context" tabs, an ID conflict occurs between the root tab (for the LogView) and the remaining open tab's close button in the DockArea below it.
-* THe main window's "no tabs open" content does not show on startup because `Tree::is_empty` is not true after creation.  After creating and closing a tab it then returns true.
+* The main window's "no tabs open" content does not show on startup because `Tree::is_empty` is not true after creation.  After creating and closing a tab it then returns true.
 * Window flashes on startup before displaying final window
