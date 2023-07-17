@@ -1,4 +1,5 @@
 # JSON Log Viewer
+[![Rust](https://github.com/jarruda/json-log-reader/actions/workflows/rust.yml/badge.svg)](https://github.com/jarruda/json-log-reader/actions/workflows/rust.yml)
 
 This is a log viewer for "structured logs".  It currently parses a log format where the file is a set of log entries separated by a newline, each log entry is an ISO-8601 formatted timestamp followed by a JSON object (with no newlines). The file is expected to be UTF-8 encoded.
 
