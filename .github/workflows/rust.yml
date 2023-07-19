@@ -18,7 +18,14 @@ jobs:
       run: cargo build --verbose --release
     - name: Run tests
       run: cargo test --verbose
-    - name: 'Upload Artifact'
+    - name: 'Upload Debug'
       uses: actions/upload-artifact@v3
       with:
-        path: target/
+        name: build-debug
+        path: target/debug/*
+    - name: 'Upload Release'
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-release
+        path: target/release/*
+  
