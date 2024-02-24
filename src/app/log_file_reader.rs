@@ -87,16 +87,15 @@ impl LogFileReader {
     }
 
     /// Parses a timestamp and JSON object from the given string slice
-    /// Format is <iso8601-timestamp> <json-object>
+    /// Format is <json-object>\n
+    /// Time is in field "t"
     /// e.g. 2023-06-25T00:49:20Z { "message": "hello, world" }
     pub fn parse_logline(line: &str) -> Option<LogEntry> {
-        let split_idx = line.find(' ')?;
-        let (timestamp, json_content) = line.split_at(split_idx);
-        let log_entry = json::parse(json_content).ok()?;
+        let log_entry = json::parse(line).ok()?;
 
         if log_entry.is_object() {
             Some(LogEntry {
-                timestamp: timestamp.to_owned(),
+                timestamp: log_entry["t"].as_str()?.to_owned(),
                 object: log_entry,
             })
         } else {
