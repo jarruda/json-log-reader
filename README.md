@@ -1,12 +1,20 @@
 # JSON Log Viewer
 [![Rust](https://github.com/jarruda/json-log-reader/actions/workflows/rust.yml/badge.svg)](https://github.com/jarruda/json-log-reader/actions/workflows/rust.yml)
 
-This is a log viewer for "structured logs".  It currently parses a log format where the file is a set of log entries separated by a newline, each log entry is an ISO-8601 formatted timestamp followed by a JSON object (with no newlines). The file is expected to be UTF-8 encoded.
+This is a log viewer for "structured logs".  It currently parses a log format where the file is a set of log entries separated by a newline, each log entry is a JSON object (with no newlines). The file is expected to be UTF-8 encoded.
+
+The current expected mandatory log entries are:
+* t: string; The ISO-8601-formatted entry timestamp.
+* level: string; The log entry's severity in the set {DEBUG, INFO, WARNING, ERROR, FATAL}
+* tag: string; An arbitrary string for the entry.
+* message: string; The entry's message.
+
+Entries can contain any other number of key/value pairs that will be displayed in the "Context" tab when a log entry is selected.
 
 Example
 ```
-2023-05-31T19:51:05.947Z {"level":"INFO","tag":"Main","message":"Hello, world!"}
-2023-05-31T19:52:05.947Z {"level":"INFO","tag":"Main","message":"This is a structured log file."}
+{"t": "2023-05-31T19:51:05.947Z", level":"INFO","tag":"Main","message":"Hello, world!"}
+{"t": "2023-05-31T19:52:05.947Z", level":"INFO","tag":"Main","message":"This is a structured log file."}
 ```
 
 This project is written in Rust. It uses egui for the UI and the application is based on https://github.com/emilk/eframe_template.
