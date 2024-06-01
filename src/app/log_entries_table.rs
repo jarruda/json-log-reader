@@ -51,7 +51,8 @@ impl<'a> LogEntriesTable<'a> {
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::auto())
             .column(Column::initial(150.0).resizable(true).clip(true))
-            .column(Column::remainder().clip(true));
+            .column(Column::remainder().clip(true))
+            .sense(egui::Sense::click());
 
         if self.scroll_to_selected {
             if let Some(selected_line) = self.selected_line {
@@ -74,16 +75,17 @@ impl<'a> LogEntriesTable<'a> {
                 });
             })
             .body(|body| {
-                body.rows(16.0, total_rows, |row_idx, mut row| {
+                body.rows(16.0, total_rows, |mut row| {
+                    let row_idx = row.index();
                     let line_number = match self.filtered_lines {
                         Some(lines) => lines[row_idx],
                         None => row_idx,
                     };
 
-                    let selected = self.selected_line == Some(line_number);
+                    row.set_selected(self.selected_line == Some(line_number));
 
                     if let Some(logline_response) =
-                        Self::ui_logline(log_file_reader, &mut row, line_number, selected)
+                        Self::ui_logline(log_file_reader, &mut row, line_number)
                     {
                         if let Some(selected_line_num) = logline_response.selected_line_num {
                             response.selected_line_num = Some(selected_line_num);
@@ -108,8 +110,7 @@ impl<'a> LogEntriesTable<'a> {
     fn ui_logline(
         log_file_reader: &mut LogFileReader,
         row: &mut TableRow<'_, '_>,
-        line_num: LineNumber,
-        selected: bool,
+        line_num: LineNumber
     ) -> Option<LogEntriesResponse> {
         let mut response: LogEntriesResponse = Default::default();
         let log_line = log_file_reader.read_line(line_num)?;
@@ -132,20 +133,11 @@ impl<'a> LogEntriesTable<'a> {
                         full_msg
                     };
                     let level = object["level"].as_str().unwrap_or("FATAL");
-
-                    if ui
-                        .selectable_label(
-                            selected,
-                            RichText::new(msg.trim())
-                                .color(color_from_loglevel(level))
-                                .monospace(),
-                        )
-                        .clicked()
-                    {
-                        response = LogEntriesResponse {
-                            selected_line_num: Some(line_num),
-                        };
-                    }
+                    ui.label(
+                        RichText::new(msg.trim())
+                            .color(color_from_loglevel(level))
+                            .monospace(),
+                    );
                 });
             }
             None => {
@@ -159,6 +151,12 @@ impl<'a> LogEntriesTable<'a> {
                     );
                 });
             }
+        }
+
+        if row.response().clicked() {
+            response = LogEntriesResponse {
+                selected_line_num: Some(line_num),
+            };
         }
 
         Some(response)

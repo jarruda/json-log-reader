@@ -1,3 +1,11 @@
+use std::path::{Path, PathBuf};
+
+use egui::{RichText, Ui};
+use egui_dock::DockState;
+use rfd::FileDialog;
+
+use self::log_view::LogView;
+
 pub mod filtered_log_entries_tab;
 pub mod log_entries_tab;
 pub mod log_entries_table;
@@ -5,29 +13,20 @@ pub mod log_entry_context_tab;
 pub mod log_file_reader;
 pub mod log_view;
 
-use std::path::{Path, PathBuf};
-
-use egui::{RichText, Ui};
-use egui_dock::Tree;
-
-use rfd::FileDialog;
-
-use self::log_view::LogView;
-
 struct LogViewTabViewer;
 
 impl egui_dock::TabViewer for LogViewTabViewer {
     type Tab = LogView;
-
-    fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
-        tab.ui(ui);
-    }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab.file_path().file_name() {
             Some(file_name) => file_name.to_string_lossy().into(),
             None => "Error".into(),
         }
+    }
+
+    fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
+        tab.ui(ui);
     }
 }
 
@@ -36,7 +35,7 @@ impl egui_dock::TabViewer for LogViewTabViewer {
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct TemplateApp {
     #[serde(skip)]
-    tree: Tree<LogView>,
+    tree: DockState<LogView>,
 
     recent_files: Vec<PathBuf>,
 }
@@ -44,7 +43,7 @@ pub struct TemplateApp {
 impl Default for TemplateApp {
     fn default() -> Self {
         Self {
-            tree: Tree::new(vec![]),
+            tree: DockState::new(vec![]),
             recent_files: vec![],
         }
     }
@@ -112,7 +111,7 @@ impl eframe::App for TemplateApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
             egui::menu::bar(ui, |ui| {
@@ -137,20 +136,24 @@ impl eframe::App for TemplateApp {
                     }
 
                     if ui.button("Quit").clicked() {
-                        frame.close();
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close)
                     }
                 });
 
                 if ui.button("Search").clicked() {
-                    if let Some((_, log_view)) = self.tree.find_active() {
+                    if let Some((_, log_view)) = self.tree.find_active_focused() {
                         log_view.open_search();
                         ui.close_menu();
                     }
                 }
+
+                ui.add_space(16.0);
+                egui::widgets::global_dark_light_mode_buttons(ui);
+                egui::warn_if_debug_build(ui);
             });
         });
 
-        if !self.tree.is_empty() {
+        if !self.tree.main_surface().is_empty() {
             egui_dock::DockArea::new(&mut self.tree).show(ctx, &mut LogViewTabViewer {})
         } else {
             egui::CentralPanel::default().show(ctx, |ui| {

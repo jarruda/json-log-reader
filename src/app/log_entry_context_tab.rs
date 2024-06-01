@@ -35,7 +35,7 @@ impl LogViewTabTrait for LogEntryContextTab {
                     .body(|mut body| {
                         for entry in log_entry.object.entries() {
                             let key_str = entry.0;
-                            let value_str = entry.1.as_str().unwrap_or_default().trim();
+                            let value_str = entry.1.to_string();
                             let line_count = value_str.chars().filter(|c| *c == '\n').count() + 1;
                             body.row((line_count as f32) * 16.0, |mut row| {
                                 row.col(|ui| {
@@ -44,7 +44,7 @@ impl LogViewTabTrait for LogEntryContextTab {
                                     );
                                 });
                                 row.col(|ui| {
-                                    ui.label(RichText::new(value_str).monospace());
+                                    ui.label(RichText::new(value_str.trim()).monospace());
                                 });
                             });
                         }

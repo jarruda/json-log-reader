@@ -10,11 +10,16 @@ fn main() -> eframe::Result<()> {
 
     info!("Starting!");
 
-    // Log to stdout (if you run with `RUST_LOG=debug`).
-    // tracing_subscriber::fmt::init();
-
-    let mut native_options = eframe::NativeOptions::default();
-    native_options.maximized = true;
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_maximized(true)
+            .with_icon(
+                // NOTE: Adding an icon is optional
+                eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon-256.png")[..])
+                    .unwrap(),
+            ),
+        ..Default::default()
+    };
     eframe::run_native(
         "JSON Log Reader",
         native_options,
