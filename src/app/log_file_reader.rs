@@ -4,6 +4,8 @@ use std::{
     path::Path,
 };
 
+use grep::searcher::{Searcher, Sink, SinkMatch};
+use grep_regex::RegexMatcherBuilder;
 use json::JsonValue;
 
 pub struct LogEntry {
@@ -15,6 +17,21 @@ pub type LineNumber = usize;
 
 type FileOffset = u64;
 
+struct AbsolutePositionSink<F>(pub F)
+where
+    F: FnMut(u64) -> Result<bool, io::Error>;
+
+impl<F> Sink for AbsolutePositionSink<F>
+where
+    F: FnMut(u64) -> Result<bool, io::Error>,
+{
+    type Error = io::Error;
+
+    fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
+        (self.0)(mat.absolute_byte_offset())
+    }
+}
+
 pub struct LogFileReader {
     buf_reader: BufReader<File>,
     line_map: Vec<FileOffset>,
@@ -22,35 +39,38 @@ pub struct LogFileReader {
 }
 
 impl LogFileReader {
-    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<LogFileReader> {
+    pub fn open(path: &Path) -> io::Result<LogFileReader> {
         let file = File::open(path)?;
-        Ok(LogFileReader::new(file))
-    }
-
-    pub fn new(file: File) -> LogFileReader {
-        LogFileReader {
+        Ok(LogFileReader {
             buf_reader: BufReader::new(file),
             line_map: Vec::new(),
             file_size: 0,
-        }
+        })
     }
 
     /// Reads the entire file to count the number of lines.
     /// Caches a map of line numbers to file positions.
     /// Returns the number of lines in the file if successful, error otherwise.
     pub fn load(&mut self) -> io::Result<usize> {
+        puffin::profile_function!();
+
         self.buf_reader.rewind()?;
         self.line_map.clear();
 
-        for i in self
-            .buf_reader
-            .by_ref()
-            .bytes()
-            .enumerate()
-            .filter(|i| i.1.is_ok() && *i.1.as_ref().unwrap() as char == '\n')
-        {
-            self.line_map.push(i.0 as FileOffset);
-        }
+        // Build a grep matcher and searcher matching the options
+        let newline = "$";
+        let matcher = RegexMatcherBuilder::new().build(&newline).unwrap();
+        let mut searcher = Searcher::new();
+
+        // Load all newline file positions into line_map
+        searcher.search_reader(
+            matcher,
+            self.buf_reader.get_ref(),
+            AbsolutePositionSink(|file_offset| -> Result<bool, io::Error> {
+                self.line_map.push(file_offset as FileOffset);
+                Ok(true)
+            }),
+        )?;
 
         self.buf_reader.seek(SeekFrom::End(0))?;
         self.file_size = self.buf_reader.stream_position()?;
@@ -109,7 +129,7 @@ impl LogFileReader {
             0
         } else {
             match self.line_map.get(line_num - 1) {
-                Some(offset) => offset + 1,
+                Some(offset) => *offset,
                 None => self.file_size,
             }
         }

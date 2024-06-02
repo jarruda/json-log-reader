@@ -124,6 +124,8 @@ impl LogView {
 
 impl LogViewContext {
     pub fn open(filepath: &Path) -> io::Result<Self> {
+        puffin::profile_function!();
+        
         let mut log_view = LogViewContext {
             log_file_path: filepath.to_owned(),
             log_file_reader: LogFileReader::open(filepath)?,

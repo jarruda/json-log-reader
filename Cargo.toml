@@ -14,17 +14,28 @@ json = "^0.12"
 regex = "^1.10"
 grep = "^0.3"
 grep-regex = "^0.1"
+wasm-bindgen-futures = "0.4.42"
 
-egui = "^0.27"
+egui = { version = "^0.27", default-features = false, features = [
+    "log",
+    "default_fonts",
+#    "extra_debug_asserts",
+    "puffin",
+    "serde"
+]}
 eframe = { version = "^0.27", default-features = false, features = [
     "default_fonts", # Embed the default egui fonts.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
     "persistence",   # Enable restoring app state when restarting the app.
+    "puffin"
 ] }
 egui_extras = "^0.27"
 egui_dock = "^0.12"
 
 serde = { version = "1", features = ["derive"] }
+
+puffin = "^0.19"
+puffin_http = "^0.16"
 
 [profile.release]
 opt-level = 2 # fast and small
