@@ -3,7 +3,7 @@ use egui_extras::{Column, TableBuilder};
 
 use super::{
     log_file_reader::LogFileReader,
-    log_view::{LogSelectionState, LogViewTabResponse, LogViewTabTrait},
+    log_view::{LogViewerState, LogViewTabResponse, LogViewTabTrait},
 };
 
 pub struct LogEntryContextTab {}
@@ -23,9 +23,9 @@ impl LogViewTabTrait for LogEntryContextTab {
         &mut self,
         ui: &mut egui::Ui,
         _log_reader: &mut LogFileReader,
-        selection_state: &LogSelectionState,
+        viewer_state: &mut LogViewerState,
     ) -> LogViewTabResponse {
-        if let Some(log_entry) = selection_state.selected_log_entry.as_ref() {
+        if let Some(log_entry) = viewer_state.selected_log_entry.as_ref() {
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 TableBuilder::new(ui)
                     .striped(true)

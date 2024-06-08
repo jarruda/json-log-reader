@@ -5,7 +5,7 @@ use std::{
 };
 
 use grep::searcher::{Searcher, Sink, SinkMatch};
-use grep_regex::RegexMatcherBuilder;
+use grep_regex::{RegexMatcher};
 use json::JsonValue;
 
 pub struct LogEntry {
@@ -59,7 +59,7 @@ impl LogFileReader {
 
         // Build a grep matcher and searcher matching the options
         let newline = "$";
-        let matcher = RegexMatcherBuilder::new().build(&newline).unwrap();
+        let matcher = RegexMatcher::new_line_matcher(&newline).unwrap();
         let mut searcher = Searcher::new();
 
         // Load all newline file positions into line_map

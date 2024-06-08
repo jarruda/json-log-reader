@@ -1,7 +1,9 @@
 use egui::{Align, Color32, RichText, Ui};
 use egui_extras::{Column, TableBuilder, TableRow};
 
-use super::log_file_reader::{LineNumber, LogEntry, LogFileReader};
+use crate::app::log_view::{ColumnTextColor, LogViewerState};
+
+use super::log_file_reader::{LineNumber, LogFileReader};
 
 #[derive(Default)]
 pub struct LogEntriesResponse {
@@ -38,7 +40,12 @@ impl<'a> LogEntriesTable<'a> {
         self
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, log_file_reader: &mut LogFileReader) -> LogEntriesResponse {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        log_file_reader: &mut LogFileReader,
+        viewer_state: &mut LogViewerState,
+    ) -> LogEntriesResponse {
         let mut response: LogEntriesResponse = Default::default();
 
         let total_rows = match self.filtered_lines {
@@ -49,10 +56,25 @@ impl<'a> LogEntriesTable<'a> {
         let mut table_builder = TableBuilder::new(ui)
             .max_scroll_height(f32::INFINITY)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto())
-            .column(Column::initial(150.0).resizable(true).clip(true))
-            .column(Column::remainder().clip(true))
             .sense(egui::Sense::click());
+
+        let mut col_iter = viewer_state.displayed_columns.iter().peekable();
+        while let Some(col_key) = col_iter.next() {
+            let is_last_col = col_iter.peek().is_none();
+            let col_style = viewer_state
+                .column_styles
+                .get(col_key)
+                .unwrap_or(Default::default());
+            let col_desc: Column = if is_last_col {
+                Column::remainder()
+            } else if col_style.auto_size {
+                Column::auto()
+            } else {
+                Column::initial(150.0).resizable(true)
+            };
+            col_desc.clip(true);
+            table_builder = table_builder.column(col_desc);
+        }
 
         if self.scroll_to_selected {
             if let Some(selected_line) = self.selected_line {
@@ -64,15 +86,11 @@ impl<'a> LogEntriesTable<'a> {
 
         table_builder
             .header(18.0, |mut row| {
-                row.col(|ui| {
-                    ui.label("Time");
-                });
-                row.col(|ui| {
-                    ui.label("Tag");
-                });
-                row.col(|ui| {
-                    ui.label("Message");
-                });
+                for displayed_column in &viewer_state.displayed_columns {
+                    row.col(|ui| {
+                        ui.label(RichText::new(displayed_column).strong());
+                    });
+                }
             })
             .body(|body| {
                 body.rows(16.0, total_rows, |mut row| {
@@ -85,9 +103,10 @@ impl<'a> LogEntriesTable<'a> {
                     row.set_selected(self.selected_line == Some(line_number));
 
                     if let Some(logline_response) =
-                        Self::ui_logline(log_file_reader, &mut row, line_number)
+                        Self::ui_logline(log_file_reader, viewer_state, &mut row, line_number)
                     {
                         if let Some(selected_line_num) = logline_response.selected_line_num {
+                            viewer_state.selected_line_num = Some(selected_line_num);
                             response.selected_line_num = Some(selected_line_num);
                         }
                     }
@@ -109,36 +128,60 @@ impl<'a> LogEntriesTable<'a> {
 
     fn ui_logline(
         log_file_reader: &mut LogFileReader,
+        viewer_state: &mut LogViewerState,
         row: &mut TableRow<'_, '_>,
-        line_num: LineNumber
+        line_num: LineNumber,
     ) -> Option<LogEntriesResponse> {
         let mut response: LogEntriesResponse = Default::default();
         let log_line = log_file_reader.read_line(line_num)?;
 
         match LogFileReader::parse_logline(&log_line) {
             Some(log_entry) => {
-                let LogEntry { timestamp, object } = log_entry;
-                row.col(|ui| {
-                    ui.label(RichText::new(timestamp).color(Color32::WHITE).monospace());
-                });
-                row.col(|ui| {
-                    let tag = object["tag"].as_str().unwrap_or_default();
-                    ui.label(RichText::new(tag).color(Color32::KHAKI).monospace());
-                });
-                row.col(|ui| {
-                    let full_msg = object["message"].as_str().unwrap_or_default().trim();
-                    let msg = if let Some(m) = full_msg.split_once('\n') {
-                        m.0
-                    } else {
-                        full_msg
-                    };
-                    let level = object["level"].as_str().unwrap_or("FATAL");
-                    ui.label(
-                        RichText::new(msg.trim())
-                            .color(color_from_loglevel(level))
-                            .monospace(),
-                    );
-                });
+                for column_str in &viewer_state.displayed_columns {
+                    row.col(|ui| {
+                        let full_col_text = log_entry.object[column_str].to_string();
+                        let column_text = if let Some(split) = full_col_text.split_once('\n') {
+                            split.0
+                        } else {
+                            &full_col_text
+                        };
+                        let mut rich_text = RichText::new(column_text).monospace();
+                        let column_style = viewer_state
+                            .column_styles
+                            .get(column_str)
+                            .unwrap_or(Default::default());
+
+                        rich_text = match column_style.color {
+                            ColumnTextColor::Color(color) => rich_text.color(color),
+                            ColumnTextColor::BySeverity => rich_text.color(color_from_loglevel(
+                                log_entry.object["level"].as_str().unwrap_or("INFO"),
+                            )),
+                        };
+                        ui.label(rich_text);
+                    });
+                }
+                // let LogEntry { timestamp, object } = log_entry;
+                // row.col(|ui| {
+                //     ui.label(RichText::new(timestamp).color(Color32::WHITE).monospace());
+                // });
+                // row.col(|ui| {
+                //     let tag = object["tag"].as_str().unwrap_or_default();
+                //     ui.label(RichText::new(tag).color(Color32::KHAKI).monospace());
+                // });
+                // row.col(|ui| {
+                //     let full_msg = object["message"].as_str().unwrap_or_default().trim();
+                //     let msg = if let Some(m) = full_msg.split_once('\n') {
+                //         m.0
+                //     } else {
+                //         full_msg
+                //     };
+                //     let level = object["level"].as_str().unwrap_or("FATAL");
+                //     ui.label(
+                //         RichText::new(msg.trim())
+                //             .color(color_from_loglevel(level))
+                //             .monospace(),
+                //     );
+                // });
             }
             None => {
                 row.col(|_| {});
