@@ -140,17 +140,22 @@ impl<'a> LogEntriesTable<'a> {
                 for column_str in &viewer_state.displayed_columns {
                     row.col(|ui| {
                         let full_col_text = log_entry.object[column_str].to_string();
-                        let column_text = if let Some(split) = full_col_text.split_once('\n') {
+                        let mut column_text = if let Some(split) = full_col_text.split_once('\n') {
                             split.0
                         } else {
                             &full_col_text
                         };
-                        let mut rich_text = RichText::new(column_text).monospace();
+
                         let column_style = viewer_state
                             .column_styles
                             .get(column_str)
                             .unwrap_or(Default::default());
 
+                        if column_style.trim {
+                            column_text = column_text.trim();
+                        }
+
+                        let mut rich_text = RichText::new(column_text).monospace();
                         rich_text = match column_style.color {
                             ColumnTextColor::Color(color) => rich_text.color(color),
                             ColumnTextColor::BySeverity => rich_text.color(color_from_loglevel(
@@ -160,28 +165,6 @@ impl<'a> LogEntriesTable<'a> {
                         ui.label(rich_text);
                     });
                 }
-                // let LogEntry { timestamp, object } = log_entry;
-                // row.col(|ui| {
-                //     ui.label(RichText::new(timestamp).color(Color32::WHITE).monospace());
-                // });
-                // row.col(|ui| {
-                //     let tag = object["tag"].as_str().unwrap_or_default();
-                //     ui.label(RichText::new(tag).color(Color32::KHAKI).monospace());
-                // });
-                // row.col(|ui| {
-                //     let full_msg = object["message"].as_str().unwrap_or_default().trim();
-                //     let msg = if let Some(m) = full_msg.split_once('\n') {
-                //         m.0
-                //     } else {
-                //         full_msg
-                //     };
-                //     let level = object["level"].as_str().unwrap_or("FATAL");
-                //     ui.label(
-                //         RichText::new(msg.trim())
-                //             .color(color_from_loglevel(level))
-                //             .monospace(),
-                //     );
-                // });
             }
             None => {
                 row.col(|_| {});

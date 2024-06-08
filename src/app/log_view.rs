@@ -1,19 +1,20 @@
-use std::collections::HashMap;
 use std::{
     io,
     path::{Path, PathBuf},
 };
+use std::collections::HashMap;
+use std::default::Default;
 
 use egui::{Color32, Id, RichText, Ui};
 use egui_dock::{DockArea, DockState, NodeIndex, SurfaceIndex, TabViewer};
 
-use super::log_file_reader::LogFileReader;
 use super::{
     filtered_log_entries_tab::FilteredLogEntriesTab,
     log_entries_tab::LogEntriesTab,
     log_entry_context_tab::LogEntryContextTab,
     log_file_reader::{LineNumber, LogEntry},
 };
+use super::log_file_reader::LogFileReader;
 
 #[derive(Default)]
 struct FilteredLogEntriesTabState {}
@@ -34,22 +35,23 @@ pub struct LogViewerState {
     pub column_styles: HashMap<String, ColumnStyle>,
 }
 
+#[derive(Clone)]
 pub enum ColumnTextColor {
     Color(Color32),
     BySeverity,
 }
 
+#[derive(Clone)]
 pub struct ColumnStyle {
     pub color: ColumnTextColor,
     pub auto_size: bool,
+    pub trim: bool,
 }
 
 impl Default for ColumnStyle {
     fn default() -> Self {
-        Self {
-            color: ColumnTextColor::Color(Color32::WHITE),
-            auto_size: false,
-        }
+        let default_col_style_ref: &ColumnStyle = Default::default();
+        (*default_col_style_ref).clone()
     }
 }
 
@@ -65,6 +67,7 @@ impl Default for LogViewerState {
                     ColumnStyle {
                         color: ColumnTextColor::Color(Color32::KHAKI),
                         auto_size: false,
+                        ..Default::default()
                     },
                 ),
                 (
@@ -84,7 +87,8 @@ impl Default for &'static ColumnStyle {
     fn default() -> Self {
         static SINGLETON: ColumnStyle = ColumnStyle {
             color: ColumnTextColor::Color(Color32::WHITE),
-            auto_size: false
+            auto_size: false,
+            trim: true
         };
         &SINGLETON
     }
