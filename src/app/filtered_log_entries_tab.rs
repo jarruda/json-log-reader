@@ -12,7 +12,7 @@ use log::error;
 use super::{
     log_entries_table::LogEntriesTable,
     log_file_reader::{LineNumber, LogFileReader},
-    log_view::{LogViewerState, LogViewTabResponse, LogViewTabTrait},
+    log_view::{LogViewTabTrait, LogViewerState},
 };
 
 #[derive(Debug)]
@@ -53,22 +53,22 @@ impl Default for SearchOptions {
 
 pub struct FilteredLogEntriesTab {
     log_file_path: PathBuf,
-    selected_line_num: Option<LineNumber>,
     editable_search_term: String,
     search_term: String,
     search_results: Vec<LineNumber>,
     search_options: SearchOptions,
+    selected_line: Option<LineNumber>
 }
 
 impl FilteredLogEntriesTab {
     pub fn new(log_file_path: PathBuf) -> Box<Self> {
         Box::new(Self {
             log_file_path,
-            selected_line_num: None,
             search_term: Default::default(),
             search_results: vec![],
             search_options: Default::default(),
             editable_search_term: Default::default(),
+            selected_line: None
         })
     }
 
@@ -170,7 +170,11 @@ impl FilteredLogEntriesTab {
 
 impl LogViewTabTrait for FilteredLogEntriesTab {
     fn title(&self) -> egui::WidgetText {
-        format!("Search: {}", self.search_term).into()
+        if self.search_term.is_empty() {
+            "Search".into()
+        } else {
+            format!("Search: {}", self.search_term).into()
+        }
     }
 
     fn ui(
@@ -178,27 +182,18 @@ impl LogViewTabTrait for FilteredLogEntriesTab {
         ui: &mut Ui,
         log_reader: &mut LogFileReader,
         viewer_state: &mut LogViewerState,
-    ) -> LogViewTabResponse {
+    ) {
         self.ui_search(ui);
 
         let mut log_entries_table = LogEntriesTable::new()
             .filtered_lines(&self.search_results)
             .select_line(viewer_state.selected_line_num);
 
-        if viewer_state.selected_line_num != self.selected_line_num {
+        if self.selected_line != viewer_state.selected_line_num {
+            self.selected_line = viewer_state.selected_line_num;
             log_entries_table = log_entries_table.scroll_to_selected();
-            self.selected_line_num = viewer_state.selected_line_num;
         }
 
-        let response = log_entries_table.ui(ui, log_reader, viewer_state);
-
-        // Save a selection that came from this tab immediately to prevent scrolling
-        if let Some(selected_line_num) = response.selected_line_num {
-            self.selected_line_num = Some(selected_line_num);
-        }
-
-        LogViewTabResponse {
-            selected_line_num: response.selected_line_num,
-        }
+        log_entries_table.ui(ui, log_reader, viewer_state);
     }
 }

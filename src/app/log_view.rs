@@ -31,7 +31,6 @@ pub struct LogSource {}
 
 pub struct LogViewerState {
     pub selected_line_num: Option<LineNumber>,
-    pub selected_log_entry: Option<LogEntry>,
     pub displayed_columns: Vec<String>,
     pub column_styles: HashMap<String, ColumnStyle>,
     pub toasts: Toasts,
@@ -71,7 +70,6 @@ impl Default for LogViewerState {
     fn default() -> Self {
         Self {
             selected_line_num: None,
-            selected_log_entry: None,
             displayed_columns: vec!["t".into(), "tag".into(), "message".into()],
             column_styles: HashMap::from([
                 (
@@ -117,11 +115,6 @@ impl Default for &'static ColumnStyle {
     }
 }
 
-#[derive(Default)]
-pub struct LogViewTabResponse {
-    pub selected_line_num: Option<LineNumber>,
-}
-
 pub trait LogViewTabTrait {
     fn title(&self) -> egui::WidgetText;
     fn ui(
@@ -129,7 +122,7 @@ pub trait LogViewTabTrait {
         ui: &mut Ui,
         log_reader: &mut LogFileReader,
         viewer_state: &mut LogViewerState,
-    ) -> LogViewTabResponse;
+    );
 }
 
 /// LogView owns a tree view that can be populated with tabs
@@ -151,15 +144,12 @@ struct LogViewContext {
 impl TabViewer for LogViewContext {
     type Tab = Box<dyn LogViewTabTrait>;
 
-    fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
-        let response = tab.ui(ui, &mut self.log_file_reader, &mut self.viewer_state);
-        if let Some(_) = response.selected_line_num {
-            self.set_selection(response.selected_line_num);
-        }
-    }
-
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         tab.title()
+    }
+
+    fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
+        tab.ui(ui, &mut self.log_file_reader, &mut self.viewer_state);
     }
 
     fn add_popup(&mut self, ui: &mut Ui, surface_index: SurfaceIndex, node: NodeIndex) {
@@ -180,10 +170,15 @@ impl LogView {
     pub fn open(file_path: &Path) -> io::Result<Self> {
         let mut tree: DockState<Box<dyn LogViewTabTrait>> =
             DockState::new(vec![LogEntriesTab::new()]);
-        tree.main_surface_mut().split_below(
+        let new_nodes = tree.main_surface_mut().split_below(
             NodeIndex::root(),
             0.8,
             vec![LogEntryContextTab::new()],
+        );
+        tree.main_surface_mut().split_right(
+            new_nodes[1],
+            0.5,
+            vec![FilteredLogEntriesTab::new(file_path.to_owned())]
         );
 
         Ok(LogView {
@@ -234,8 +229,8 @@ impl LogViewContext {
             Ok(line_count) => {
                 log_view.viewer_state.add_toast(
                     ToastKind::Info,
-                    format!("Loaded {} lines.", line_count).into(),
-                    2.0,
+                    format!("File load complete. Loaded {} lines.", line_count).into(),
+                    10.0,
                 );
             }
             Err(e) => {
@@ -247,15 +242,6 @@ impl LogViewContext {
             }
         }
         Ok(log_view)
-    }
-
-    fn set_selection(&mut self, selected_line_num: Option<LineNumber>) {
-        self.viewer_state.selected_line_num = selected_line_num;
-
-        if let Some(selected_line_num) = selected_line_num {
-            self.viewer_state.selected_log_entry =
-                self.log_file_reader.read_entry(selected_line_num);
-        }
     }
 
     pub fn open_search(&mut self) {

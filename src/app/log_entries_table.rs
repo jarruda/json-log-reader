@@ -1,14 +1,13 @@
-use egui::{Align, Color32, RichText, Ui};
+use eframe::emath::Vec2;
+use egui::{
+    include_image, Align, Button, Color32, CursorIcon, ImageSource, Response, RichText, Ui,
+};
 use egui_extras::{Column, TableBuilder, TableRow};
+use egui_toast::ToastKind;
 
 use crate::app::log_view::{ColumnTextColor, LogViewerState};
 
 use super::log_file_reader::{LineNumber, LogFileReader};
-
-#[derive(Default)]
-pub struct LogEntriesResponse {
-    pub selected_line_num: Option<LineNumber>,
-}
 
 pub struct LogEntriesTable<'a> {
     filtered_lines: Option<&'a [LineNumber]>,
@@ -17,6 +16,19 @@ pub struct LogEntriesTable<'a> {
 }
 
 impl<'a> LogEntriesTable<'a> {
+    fn add_tool_button(
+        ui: &mut egui::Ui,
+        image_source: ImageSource<'_>,
+        hover_text: &str,
+    ) -> Response {
+        ui.add_sized(
+            Vec2::new(14.0, 14.0),
+            Button::image(image_source).frame(false),
+        )
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .on_hover_text(hover_text)
+    }
+
     pub fn new() -> Self {
         Self {
             filtered_lines: None,
@@ -45,9 +57,7 @@ impl<'a> LogEntriesTable<'a> {
         ui: &mut Ui,
         log_file_reader: &mut LogFileReader,
         viewer_state: &mut LogViewerState,
-    ) -> LogEntriesResponse {
-        let mut response: LogEntriesResponse = Default::default();
-
+    ) {
         let total_rows = match self.filtered_lines {
             Some(lines) => lines.len(),
             None => log_file_reader.line_count() as usize,
@@ -56,6 +66,7 @@ impl<'a> LogEntriesTable<'a> {
         let mut table_builder = TableBuilder::new(ui)
             .max_scroll_height(f32::INFINITY)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .striped(true)
             .sense(egui::Sense::click());
 
         let mut col_iter = viewer_state.displayed_columns.iter().peekable();
@@ -81,14 +92,31 @@ impl<'a> LogEntriesTable<'a> {
                     table_builder = table_builder.scroll_to_row(selected_row, Some(Align::Center));
                 }
             }
+            self.scroll_to_selected = false;
         }
 
         table_builder
             .header(18.0, |mut row| {
+                let columns_displayed_count = viewer_state.displayed_columns.len();
+                let mut columns_to_remove: Vec<String> = vec![];
                 for displayed_column in &viewer_state.displayed_columns {
                     row.col(|ui| {
                         ui.label(RichText::new(displayed_column).strong());
+                        if columns_displayed_count > 1 {
+                            let rm_icon = include_image!("../../assets/icons8-minus-48-white.png");
+                            if Self::add_tool_button(ui, rm_icon, "Remove Column").clicked() {
+                                columns_to_remove.push(displayed_column.clone());
+                            }
+                        }
                     });
+                }
+
+                if !columns_to_remove.is_empty() {
+                    viewer_state
+                        .displayed_columns
+                        .retain(|c| !columns_to_remove.contains(c));
+
+                    viewer_state.add_toast(ToastKind::Info, "Removed column.".into(), 2.0);
                 }
             })
             .body(|body| {
@@ -101,18 +129,14 @@ impl<'a> LogEntriesTable<'a> {
 
                     row.set_selected(self.selected_line == Some(line_number));
 
-                    if let Some(logline_response) =
-                        Self::ui_logline(log_file_reader, viewer_state, &mut row, line_number)
-                    {
-                        if let Some(selected_line_num) = logline_response.selected_line_num {
-                            viewer_state.selected_line_num = Some(selected_line_num);
-                            response.selected_line_num = Some(selected_line_num);
-                        }
+                    Self::ui_logline(log_file_reader, viewer_state, &mut row, line_number);
+
+                    if row.response().clicked() {
+                        self.selected_line = Some(line_number);
+                        viewer_state.selected_line_num = self.selected_line;
                     }
                 });
             });
-
-        response
     }
 
     /// Maps a line number to a table row.
@@ -130,8 +154,7 @@ impl<'a> LogEntriesTable<'a> {
         viewer_state: &mut LogViewerState,
         row: &mut TableRow<'_, '_>,
         line_num: LineNumber,
-    ) -> Option<LogEntriesResponse> {
-        let mut response: LogEntriesResponse = Default::default();
+    ) -> Option<()> {
         let log_line = log_file_reader.read_line(line_num)?;
 
         match LogFileReader::parse_logline(&log_line) {
@@ -139,7 +162,11 @@ impl<'a> LogEntriesTable<'a> {
                 for column_str in &viewer_state.displayed_columns {
                     row.col(|ui| {
                         let column_value = &log_entry.object[column_str];
-                        let full_col_text = if column_value.is_empty() { String::new() } else { column_value.to_string() };
+                        let full_col_text = if column_value.is_empty() {
+                            String::new()
+                        } else {
+                            column_value.to_string()
+                        };
                         let mut column_text = if let Some(split) = full_col_text.split_once('\n') {
                             split.0
                         } else {
@@ -179,13 +206,7 @@ impl<'a> LogEntriesTable<'a> {
             }
         }
 
-        if row.response().clicked() {
-            response = LogEntriesResponse {
-                selected_line_num: Some(line_num),
-            };
-        }
-
-        Some(response)
+        Some(())
     }
 }
 
