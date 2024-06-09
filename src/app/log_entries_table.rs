@@ -70,9 +70,8 @@ impl<'a> LogEntriesTable<'a> {
             } else if col_style.auto_size {
                 Column::auto()
             } else {
-                Column::initial(150.0).resizable(true)
+                Column::initial(150.0).resizable(true).clip(true)
             };
-            col_desc.clip(true);
             table_builder = table_builder.column(col_desc);
         }
 
@@ -139,7 +138,8 @@ impl<'a> LogEntriesTable<'a> {
             Some(log_entry) => {
                 for column_str in &viewer_state.displayed_columns {
                     row.col(|ui| {
-                        let full_col_text = log_entry.object[column_str].to_string();
+                        let column_value = &log_entry.object[column_str];
+                        let full_col_text = if column_value.is_empty() { String::new() } else { column_value.to_string() };
                         let mut column_text = if let Some(split) = full_col_text.split_once('\n') {
                             split.0
                         } else {

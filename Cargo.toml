@@ -29,8 +29,9 @@ eframe = { version = "^0.27", default-features = false, features = [
     "persistence",   # Enable restoring app state when restarting the app.
     "puffin"
 ] }
-egui_extras = "^0.27"
+egui_extras = { version = "^0.27", features = ["all_loaders"] }
 egui_dock = "^0.12"
+egui-toast = "^0.13"
 
 serde = { version = "1", features = ["derive"] }
 

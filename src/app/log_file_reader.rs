@@ -8,6 +8,7 @@ use grep::searcher::{Searcher, Sink, SinkMatch};
 use grep_regex::{RegexMatcher};
 use json::JsonValue;
 
+#[derive(Clone)]
 pub struct LogEntry {
     pub timestamp: String,
     pub object: JsonValue,
@@ -106,10 +107,9 @@ impl LogFileReader {
         Self::parse_logline(&line_content)
     }
 
-    /// Parses a timestamp and JSON object from the given string slice
+    /// Parses a JSON object from the given string slice
     /// Format is <json-object>\n
-    /// Time is in field "t"
-    /// e.g. 2023-06-25T00:49:20Z { "message": "hello, world" }
+    /// e.g. { "t": "2023-06-25T00:49:20Z", "message": "hello, world" }
     pub fn parse_logline(line: &str) -> Option<LogEntry> {
         let log_entry = json::parse(line).ok()?;
 

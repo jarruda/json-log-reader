@@ -5,8 +5,9 @@ use std::{
 use std::collections::HashMap;
 use std::default::Default;
 
-use egui::{Color32, Id, RichText, Ui};
+use egui::{Align2, Color32, Direction, Id, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, NodeIndex, SurfaceIndex, TabViewer};
+use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 
 use super::{
     filtered_log_entries_tab::FilteredLogEntriesTab,
@@ -33,6 +34,17 @@ pub struct LogViewerState {
     pub selected_log_entry: Option<LogEntry>,
     pub displayed_columns: Vec<String>,
     pub column_styles: HashMap<String, ColumnStyle>,
+    pub toasts: Toasts,
+}
+
+impl LogViewerState {
+    pub fn add_toast(&mut self, kind: ToastKind, text: WidgetText, duration_in_seconds: f64) {
+        self.toasts.add(Toast {
+            kind,
+            text,
+            options: ToastOptions::default().duration_in_seconds(duration_in_seconds),
+        });
+    }
 }
 
 #[derive(Clone)]
@@ -63,6 +75,14 @@ impl Default for LogViewerState {
             displayed_columns: vec!["t".into(), "tag".into(), "message".into()],
             column_styles: HashMap::from([
                 (
+                    "t".to_string(),
+                    ColumnStyle {
+                        color: ColumnTextColor::Color(Color32::WHITE),
+                        auto_size: true,
+                        ..Default::default()
+                    },
+                ),
+                (
                     "tag".to_string(),
                     ColumnStyle {
                         color: ColumnTextColor::Color(Color32::KHAKI),
@@ -74,21 +94,24 @@ impl Default for LogViewerState {
                     "message".to_string(),
                     ColumnStyle {
                         color: ColumnTextColor::BySeverity,
+                        auto_size: false,
                         ..Default::default()
                     },
                 ),
             ]),
+            toasts: Toasts::new()
+                .anchor(Align2::CENTER_BOTTOM, (0.0, -25.0))
+                .direction(Direction::BottomUp),
         }
     }
 }
-
 
 impl Default for &'static ColumnStyle {
     fn default() -> Self {
         static SINGLETON: ColumnStyle = ColumnStyle {
             color: ColumnTextColor::Color(Color32::WHITE),
             auto_size: false,
-            trim: true
+            trim: true,
         };
         &SINGLETON
     }
@@ -121,7 +144,6 @@ pub struct LogView {
 struct LogViewContext {
     log_file_path: PathBuf,
     log_file_reader: LogFileReader,
-    status_text: RichText,
     tabs_to_open: Vec<(Box<dyn LogViewTabTrait>, SurfaceIndex, NodeIndex)>,
     viewer_state: LogViewerState,
 }
@@ -189,6 +211,8 @@ impl LogView {
                 .set_focused_node_and_surface((destination_surface, destination_node));
             self.tree.push_to_focused_leaf(tab_type);
         }
+
+        self.log_view_context.viewer_state.toasts.show(ui.ctx());
     }
 
     pub fn open_search(&mut self) {
@@ -203,18 +227,23 @@ impl LogViewContext {
         let mut log_view = LogViewContext {
             log_file_path: filepath.to_owned(),
             log_file_reader: LogFileReader::open(filepath)?,
-            status_text: Default::default(),
             tabs_to_open: vec![],
             viewer_state: Default::default(),
         };
         match log_view.log_file_reader.load() {
             Ok(line_count) => {
-                log_view.status_text = RichText::new(format!("Loaded {} lines.", line_count));
+                log_view.viewer_state.add_toast(
+                    ToastKind::Info,
+                    format!("Loaded {} lines.", line_count).into(),
+                    2.0,
+                );
             }
             Err(e) => {
-                log_view.status_text =
-                    RichText::new(format!("Failed to load lines from file: {}", e))
-                        .color(Color32::RED);
+                log_view.viewer_state.add_toast(
+                    ToastKind::Error,
+                    format!("Failed to load lines from file: {}", e).into(),
+                    10.0,
+                );
             }
         }
         Ok(log_view)
