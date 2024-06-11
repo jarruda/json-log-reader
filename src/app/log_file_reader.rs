@@ -83,7 +83,7 @@ impl LogFileReader {
     /// Returns the total number of lines counted in the file
     /// Only valid after a successful load.
     pub fn line_count(&self) -> usize {
-        self.line_map.len()
+        self.line_map.len() - 1
     }
 
     /// Reads a line from the file parsed as a UTF8 string
@@ -125,19 +125,15 @@ impl LogFileReader {
 
     /// Returns the file offset of the beginning of the given line number
     fn line_start_offset(&self, line_num: LineNumber) -> FileOffset {
-        if line_num == 0 {
-            0
-        } else {
-            match self.line_map.get(line_num - 1) {
-                Some(offset) => *offset,
-                None => self.file_size,
-            }
+        match self.line_map.get(line_num) {
+            Some(offset) => *offset,
+            None => self.file_size,
         }
     }
 
     /// Returns the file offset of the end of the given line number
     fn line_end_offset(&self, line_num: LineNumber) -> FileOffset {
-        match self.line_map.get(line_num) {
+        match self.line_map.get(line_num + 1) {
             Some(offset) => *offset,
             None => self.file_size,
         }
