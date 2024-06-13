@@ -21,12 +21,9 @@ impl<'a> LogEntriesTable<'a> {
         image_source: ImageSource<'_>,
         hover_text: &str,
     ) -> Response {
-        ui.add_sized(
-            Vec2::new(14.0, 14.0),
-            Button::image(image_source).frame(false),
-        )
-        .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text(hover_text)
+        ui.add_sized(Vec2::new(18.0, 18.0), Button::image(image_source))
+            .on_hover_cursor(CursorIcon::PointingHand)
+            .on_hover_text(hover_text)
     }
 
     pub fn new() -> Self {
@@ -67,8 +64,10 @@ impl<'a> LogEntriesTable<'a> {
             .max_scroll_height(f32::INFINITY)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .striped(true)
+            .auto_shrink(false)
+            .min_scrolled_height(0.0)
             .sense(egui::Sense::click());
-
+        
         let mut col_iter = viewer_state.displayed_columns.iter().peekable();
         while let Some(col_key) = col_iter.next() {
             let is_last_col = col_iter.peek().is_none();
@@ -96,7 +95,7 @@ impl<'a> LogEntriesTable<'a> {
         }
 
         table_builder
-            .header(18.0, |mut row| {
+            .header(24.0, |mut row| {
                 let columns_displayed_count = viewer_state.displayed_columns.len();
                 let mut columns_to_remove: Vec<String> = vec![];
                 for displayed_column in &viewer_state.displayed_columns {
@@ -155,7 +154,19 @@ impl<'a> LogEntriesTable<'a> {
         row: &mut TableRow<'_, '_>,
         line_num: LineNumber,
     ) -> Option<()> {
-        let log_line = log_file_reader.read_line(line_num)?;
+        let log_line_opt = log_file_reader.read_line(line_num);
+
+        if log_line_opt.is_none() {
+            row.col(|ui| {
+                ui.label(
+                    RichText::new("⚠ Failed to read from log file.")
+                        .color(ui.visuals().warn_fg_color),
+                );
+            });
+            return None;
+        }
+
+        let log_line = log_line_opt.unwrap();
 
         match LogFileReader::parse_logline(&log_line) {
             Some(log_entry) => {
@@ -194,8 +205,6 @@ impl<'a> LogEntriesTable<'a> {
                 }
             }
             None => {
-                row.col(|_| {});
-                row.col(|_| {});
                 row.col(|ui| {
                     ui.label(
                         RichText::new(log_line.trim())

@@ -5,14 +5,14 @@ use std::{
 };
 
 use egui::Ui;
-use grep::searcher::{sinks::Lossy, Searcher};
+use grep::searcher::{Searcher, sinks::Lossy};
 use grep_regex::RegexMatcherBuilder;
 use log::error;
 
 use super::{
     log_entries_table::LogEntriesTable,
     log_file_reader::{LineNumber, LogFileReader},
-    log_view::{LogViewTabTrait, LogViewerState},
+    log_view::{LogViewerState, LogViewTabTrait},
 };
 
 #[derive(Debug)]
