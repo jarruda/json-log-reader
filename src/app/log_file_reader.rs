@@ -4,6 +4,7 @@ use std::{
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::Path,
 };
+use std::time::SystemTime;
 use crossbeam_channel::Receiver;
 
 use grep::searcher::{Searcher, Sink, SinkMatch};
@@ -44,6 +45,7 @@ pub struct LogFileReader {
     buf_reader: BufReader<File>,
     line_map: Vec<FileOffset>,
     file_size: FileOffset,
+    load_time_point: Option<SystemTime>,
     _watcher: Box<dyn Watcher>,
     watcher_recv: Receiver<notify::Result<Event>>,
 }
@@ -63,6 +65,7 @@ impl LogFileReader {
             buf_reader: BufReader::new(file),
             line_map: Vec::new(),
             file_size: 0,
+            load_time_point: None,
             _watcher: Box::new(watcher),
             watcher_recv: rx,
         })
@@ -96,11 +99,16 @@ impl LogFileReader {
         self.file_size = self.buf_reader.stream_position()?;
         self.line_map.push(self.file_size);
 
+        self.load_time_point = Some(SystemTime::now());
         Ok(self.line_count())
     }
 
     pub fn has_changed(&mut self) -> bool {
         self.watcher_recv.try_recv().is_ok()
+    }
+
+    pub fn load_time_point(&self) -> Option<SystemTime> {
+        self.load_time_point
     }
 
     /// Returns the total number of lines counted in the file

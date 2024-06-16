@@ -1,18 +1,19 @@
+use std::time::SystemTime;
 use std::{
     fs::File,
     io,
     path::{Path, PathBuf},
 };
 
-use egui::Ui;
-use grep::searcher::{Searcher, sinks::Lossy};
+use egui::{include_image, Button, CursorIcon, Ui};
+use grep::searcher::{sinks::Lossy, Searcher};
 use grep_regex::RegexMatcherBuilder;
 use log::error;
 
 use super::{
     log_entries_table::LogEntriesTable,
     log_file_reader::{LineNumber, LogFileReader},
-    log_view::{LogViewerState, LogViewTabTrait},
+    log_view::{LogViewTabTrait, LogViewerState},
 };
 
 #[derive(Debug)]
@@ -57,7 +58,9 @@ pub struct FilteredLogEntriesTab {
     search_term: String,
     search_results: Vec<LineNumber>,
     search_options: SearchOptions,
-    selected_line: Option<LineNumber>
+    log_entries_table: LogEntriesTable,
+    repeat_search: bool,
+    last_search_time: Option<SystemTime>,
 }
 
 impl FilteredLogEntriesTab {
@@ -68,7 +71,9 @@ impl FilteredLogEntriesTab {
             search_results: vec![],
             search_options: Default::default(),
             editable_search_term: Default::default(),
-            selected_line: None
+            log_entries_table: LogEntriesTable::new(),
+            repeat_search: true,
+            last_search_time: None,
         })
     }
 
@@ -112,6 +117,12 @@ impl FilteredLogEntriesTab {
 
     fn execute_search(&mut self) {
         self.search_term = self.editable_search_term.clone();
+        self.last_search_time = Some(SystemTime::now());
+
+        if self.search_term.is_empty() {
+            self.search_results.clear();
+            return;
+        }
 
         match Self::search(&self.search_options, &self.log_file_path, &self.search_term) {
             Ok(results) => {
@@ -183,17 +194,40 @@ impl LogViewTabTrait for FilteredLogEntriesTab {
         log_reader: &mut LogFileReader,
         viewer_state: &mut LogViewerState,
     ) {
+        let mut repeat_search = self.repeat_search;
+
         self.ui_search(ui);
 
-        let mut log_entries_table = LogEntriesTable::new()
-            .filtered_lines(&self.search_results)
-            .select_line(viewer_state.selected_line_num);
-
-        if self.selected_line != viewer_state.selected_line_num {
-            self.selected_line = viewer_state.selected_line_num;
-            log_entries_table = log_entries_table.scroll_to_selected();
+        if repeat_search && log_reader.load_time_point().is_some() {
+            let search_needed = match self.last_search_time {
+                None => true,
+                Some(last_search_time) => last_search_time < log_reader.load_time_point().unwrap(),
+            };
+            if search_needed {
+                self.execute_search();
+            }
         }
 
-        log_entries_table.ui(ui, log_reader, viewer_state);
+        self.log_entries_table.ui(
+            ui,
+            log_reader,
+            viewer_state,
+            Some(&self.search_results),
+            |ui| {
+                if ui
+                    .add(
+                        Button::image(include_image!("../../assets/icons8-repeat-24-white.png"))
+                            .selected(repeat_search),
+                    )
+                    .on_hover_cursor(CursorIcon::PointingHand)
+                    .on_hover_text("Repeat Search on Change")
+                    .clicked()
+                {
+                    repeat_search = !repeat_search;
+                };
+            },
+        );
+
+        self.repeat_search = repeat_search;
     }
 }

@@ -9,44 +9,31 @@ use crate::app::log_view::{ColumnTextColor, LogViewerState};
 
 use super::log_file_reader::{LineNumber, LogFileReader};
 
-pub struct LogEntriesTable<'a> {
-    filtered_lines: Option<&'a [LineNumber]>,
+pub struct LogEntriesTable {
     selected_line: Option<usize>,
     scroll_to_selected: bool,
+    sync_line_selection: bool,
+    tail_log: bool,
 }
 
-impl<'a> LogEntriesTable<'a> {
+impl LogEntriesTable {
     fn add_tool_button(
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         image_source: ImageSource<'_>,
         hover_text: &str,
     ) -> Response {
-        ui.add_sized(Vec2::new(18.0, 18.0), Button::image(image_source))
+        ui.add_sized(Vec2::new(16.0, 16.0), Button::image(image_source))
             .on_hover_cursor(CursorIcon::PointingHand)
             .on_hover_text(hover_text)
     }
 
     pub fn new() -> Self {
         Self {
-            filtered_lines: None,
             selected_line: None,
             scroll_to_selected: false,
+            sync_line_selection: true,
+            tail_log: false,
         }
-    }
-
-    pub fn scroll_to_selected(mut self) -> Self {
-        self.scroll_to_selected = true;
-        self
-    }
-
-    pub fn select_line(mut self, row: Option<usize>) -> Self {
-        self.selected_line = row;
-        self
-    }
-
-    pub fn filtered_lines(mut self, lines: &'a [LineNumber]) -> Self {
-        self.filtered_lines = Some(lines);
-        self
     }
 
     pub fn ui(
@@ -54,20 +41,24 @@ impl<'a> LogEntriesTable<'a> {
         ui: &mut Ui,
         log_file_reader: &mut LogFileReader,
         viewer_state: &mut LogViewerState,
+        filtered_entries: Option<&[LineNumber]>,
+        add_toolbar_contents: impl FnOnce(&mut Ui)
     ) {
-        let total_rows = match self.filtered_lines {
+        self.toolbar_ui(ui, log_file_reader, viewer_state, add_toolbar_contents);
+
+        let total_rows = match filtered_entries {
             Some(lines) => lines.len(),
-            None => log_file_reader.line_count() as usize,
+            None => log_file_reader.line_count(),
         };
 
         let mut table_builder = TableBuilder::new(ui)
             .max_scroll_height(f32::INFINITY)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .cell_layout(egui::Layout::left_to_right(Align::Center))
             .striped(true)
             .auto_shrink(false)
             .min_scrolled_height(0.0)
             .sense(egui::Sense::click());
-        
+
         let mut col_iter = viewer_state.displayed_columns.iter().peekable();
         while let Some(col_key) = col_iter.next() {
             let is_last_col = col_iter.peek().is_none();
@@ -85,10 +76,15 @@ impl<'a> LogEntriesTable<'a> {
             table_builder = table_builder.column(col_desc);
         }
 
-        if self.scroll_to_selected {
-            if let Some(selected_line) = self.selected_line {
-                if let Some(selected_row) = self.find_row_for_line(selected_line) {
+        if self.tail_log {
+            if let Some(row) = self.last_row_index(log_file_reader, filtered_entries) {
+                table_builder = table_builder.scroll_to_row(row, Some(Align::BOTTOM));
+            }
+        } else if self.sync_line_selection && self.selected_line != viewer_state.selected_line_num {
+            if let Some(selected_line) = viewer_state.selected_line_num {
+                if let Some(selected_row) = self.find_row_for_line(selected_line, filtered_entries) {
                     table_builder = table_builder.scroll_to_row(selected_row, Some(Align::Center));
+                    self.selected_line = viewer_state.selected_line_num;
                 }
             }
             self.scroll_to_selected = false;
@@ -102,7 +98,7 @@ impl<'a> LogEntriesTable<'a> {
                     row.col(|ui| {
                         ui.label(RichText::new(displayed_column).strong());
                         if columns_displayed_count > 1 {
-                            let rm_icon = include_image!("../../assets/icons8-minus-48-white.png");
+                            let rm_icon = include_image!("../../assets/icons8-minus-24-white.png");
                             if Self::add_tool_button(ui, rm_icon, "Remove Column").clicked() {
                                 columns_to_remove.push(displayed_column.clone());
                             }
@@ -121,7 +117,7 @@ impl<'a> LogEntriesTable<'a> {
             .body(|body| {
                 body.rows(16.0, total_rows, |mut row| {
                     let row_idx = row.index();
-                    let line_number = match self.filtered_lines {
+                    let line_number = match filtered_entries {
                         Some(lines) => lines[row_idx],
                         None => row_idx,
                     };
@@ -132,7 +128,9 @@ impl<'a> LogEntriesTable<'a> {
 
                     if row.response().clicked() {
                         self.selected_line = Some(line_number);
-                        viewer_state.selected_line_num = self.selected_line;
+                        if self.sync_line_selection {
+                            viewer_state.selected_line_num = self.selected_line;
+                        }
                     }
                 });
             });
@@ -141,10 +139,23 @@ impl<'a> LogEntriesTable<'a> {
     /// Maps a line number to a table row.
     /// If there is a set of filtered lines set, a binary search is performed to
     /// find the correct row. Otherwise, the line number is returned as the row.
-    fn find_row_for_line(&self, line_number: LineNumber) -> Option<usize> {
-        match self.filtered_lines {
+    fn find_row_for_line(&self, line_number: LineNumber, filtered_entries: Option<&[LineNumber]>) -> Option<usize> {
+        match filtered_entries {
             Some(lines) => Some(lines.binary_search(&line_number).ok()?),
             None => Some(line_number),
+        }
+    }
+
+    fn last_row_index(&self, log_file_reader: &LogFileReader, filtered_entries: Option<&[LineNumber]>) -> Option<usize> {
+        match filtered_entries {
+            Some(lines) => {
+                if lines.is_empty() {
+                    None
+                } else {
+                    Some(lines.len() - 1)
+                }
+            }
+            None => Some(log_file_reader.line_count() - 1),
         }
     }
 
@@ -216,6 +227,41 @@ impl<'a> LogEntriesTable<'a> {
         }
 
         Some(())
+    }
+    fn toolbar_ui(
+        &mut self,
+        ui: &mut Ui,
+        _log_file_reader: &mut LogFileReader,
+        _log_viewer_state: &mut LogViewerState,
+        add_toolbar_contents: impl FnOnce(&mut Ui) + Sized,
+    ) {
+        ui.horizontal(|ui| {
+            if ui
+                .add(
+                    Button::image(include_image!("../../assets/icons8-update-50-white.png"))
+                        .selected(self.tail_log),
+                )
+                .on_hover_cursor(CursorIcon::PointingHand)
+                .on_hover_text("Tail Log")
+                .clicked()
+            {
+                self.tail_log = !self.tail_log;
+            };
+            if ui
+                .add(
+                    Button::image(include_image!("../../assets/icons8-link-24-white.png"))
+                        .selected(self.sync_line_selection),
+                )
+                .on_hover_cursor(CursorIcon::PointingHand)
+                .on_hover_text("Sync Selection")
+                .clicked()
+            {
+                self.sync_line_selection = !self.sync_line_selection;
+            };
+            
+            add_toolbar_contents(ui);
+        });
+        ui.separator();
     }
 }
 

@@ -21,7 +21,7 @@ impl LogEntryContextTab {
         image_source: ImageSource<'_>,
         hover_text: &str,
     ) -> Response {
-        ui.add_sized(Vec2::new(18.0, 18.0), Button::image(image_source))
+        ui.add_sized(Vec2::new(16.0, 16.0), Button::image(image_source))
             .on_hover_text(hover_text)
             .on_hover_cursor(CursorIcon::PointingHand)
     }
@@ -78,7 +78,7 @@ impl LogViewTabTrait for LogEntryContextTab {
                                     viewer_state.displayed_columns.iter().any(|s| s == key_str);
                                 if !column_is_shown {
                                     let add_icon =
-                                        include_image!("../../assets/icons8-add-48-white.png");
+                                        include_image!("../../assets/icons8-plus-24-white.png");
                                     if Self::add_tool_button(ui, add_icon, "Add Column").clicked() {
                                         viewer_state.displayed_columns.push(key_str.to_string());
 
@@ -95,7 +95,7 @@ impl LogViewTabTrait for LogEntryContextTab {
                             });
                             row.col(|ui| {
                                 let copy_icon =
-                                    include_image!("../../assets/icons8-copy-48-white.png");
+                                    include_image!("../../assets/icons8-duplicate-32-white.png");
                                 if Self::add_tool_button(ui, copy_icon, "Copy Value").clicked() {
                                     ui.output_mut(|o| {
                                         o.copied_text = value_str.clone();
