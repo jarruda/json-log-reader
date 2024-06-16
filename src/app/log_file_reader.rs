@@ -1,12 +1,19 @@
+use io::Error;
 use std::{
     fs::File,
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::Path,
 };
+use crossbeam_channel::Receiver;
 
 use grep::searcher::{Searcher, Sink, SinkMatch};
-use grep_regex::{RegexMatcher};
+use grep_regex::RegexMatcher;
 use json::JsonValue;
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+
+fn to_io_error(err: notify::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, err)
+}
 
 #[derive(Clone)]
 pub struct LogEntry {
@@ -20,13 +27,13 @@ type FileOffset = u64;
 
 struct AbsolutePositionSink<F>(pub F)
 where
-    F: FnMut(u64) -> Result<bool, io::Error>;
+    F: FnMut(u64) -> Result<bool, Error>;
 
 impl<F> Sink for AbsolutePositionSink<F>
 where
-    F: FnMut(u64) -> Result<bool, io::Error>,
+    F: FnMut(u64) -> Result<bool, Error>,
 {
-    type Error = io::Error;
+    type Error = Error;
 
     fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
         (self.0)(mat.absolute_byte_offset())
@@ -37,15 +44,27 @@ pub struct LogFileReader {
     buf_reader: BufReader<File>,
     line_map: Vec<FileOffset>,
     file_size: FileOffset,
+    _watcher: Box<dyn Watcher>,
+    watcher_recv: Receiver<notify::Result<Event>>,
 }
 
 impl LogFileReader {
     pub fn open(path: &Path) -> io::Result<LogFileReader> {
+        // sync_channel of 0 makes it a "rendezvous" channel where the watching thread hands off to receiver
+        let (tx, rx) = crossbeam_channel::bounded(0);
+
+        let mut watcher = RecommendedWatcher::new(tx, Config::default()).map_err(to_io_error)?;
+        watcher
+            .watch(path, RecursiveMode::NonRecursive)
+            .map_err(to_io_error)?;
+
         let file = File::open(path)?;
         Ok(LogFileReader {
             buf_reader: BufReader::new(file),
             line_map: Vec::new(),
             file_size: 0,
+            _watcher: Box::new(watcher),
+            watcher_recv: rx,
         })
     }
 
@@ -67,7 +86,7 @@ impl LogFileReader {
         searcher.search_reader(
             matcher,
             self.buf_reader.get_ref(),
-            AbsolutePositionSink(|file_offset| -> Result<bool, io::Error> {
+            AbsolutePositionSink(|file_offset| -> Result<bool, Error> {
                 self.line_map.push(file_offset as FileOffset);
                 Ok(true)
             }),
@@ -78,6 +97,10 @@ impl LogFileReader {
         self.line_map.push(self.file_size);
 
         Ok(self.line_count())
+    }
+
+    pub fn has_changed(&mut self) -> bool {
+        self.watcher_recv.try_recv().is_ok()
     }
 
     /// Returns the total number of lines counted in the file

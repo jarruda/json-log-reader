@@ -1,21 +1,23 @@
+use std::collections::HashMap;
+use std::default::Default;
+use std::time::SystemTime;
 use std::{
     io,
     path::{Path, PathBuf},
 };
-use std::collections::HashMap;
-use std::default::Default;
 
 use egui::{Align2, Color32, Direction, Id, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, NodeIndex, SurfaceIndex, TabViewer};
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
+use log::{error, info};
 
+use super::log_file_reader::LogFileReader;
 use super::{
     filtered_log_entries_tab::FilteredLogEntriesTab,
     log_entries_tab::LogEntriesTab,
     log_entry_context_tab::LogEntryContextTab,
-    log_file_reader::{LineNumber, LogEntry},
+    log_file_reader::{LineNumber},
 };
-use super::log_file_reader::LogFileReader;
 
 #[derive(Default)]
 struct FilteredLogEntriesTabState {}
@@ -178,7 +180,7 @@ impl LogView {
         tree.main_surface_mut().split_right(
             new_nodes[1],
             0.5,
-            vec![FilteredLogEntriesTab::new(file_path.to_owned())]
+            vec![FilteredLogEntriesTab::new(file_path.to_owned())],
         );
 
         Ok(LogView {
@@ -193,6 +195,20 @@ impl LogView {
     }
 
     pub fn ui(self: &mut Self, ui: &mut Ui) {
+        if self.log_view_context.log_file_reader.has_changed() {
+            info!(
+                "File updated, reloading. {:?}",
+                self.log_view_context.log_file_path
+            );
+            let load_result = self.log_view_context.log_file_reader.load();
+            if let Err(e) = load_result {
+                error!(
+                    "Failed to reload file. file: {:?} error: {:?}",
+                    self.log_view_context.log_file_path, e
+                );
+            }
+        }
+
         DockArea::new(&mut self.tree)
             .id(Id::new(&self.file_path))
             .show_add_buttons(true)
@@ -225,11 +241,19 @@ impl LogViewContext {
             tabs_to_open: vec![],
             viewer_state: Default::default(),
         };
+
+        let load_start_time = SystemTime::now();
+
         match log_view.log_file_reader.load() {
             Ok(line_count) => {
                 log_view.viewer_state.add_toast(
                     ToastKind::Info,
-                    format!("File load complete. Loaded {} lines.", line_count).into(),
+                    format!(
+                        "File load complete. Loaded {} lines in {:?}.",
+                        line_count,
+                        load_start_time.elapsed().unwrap()
+                    )
+                    .into(),
                     10.0,
                 );
             }

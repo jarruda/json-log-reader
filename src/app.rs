@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use egui::{RichText, Ui};
 use egui_dock::DockState;
@@ -110,7 +111,7 @@ impl eframe::App for TemplateApp {
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         puffin::profile_function!();
-        
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
             egui::menu::bar(ui, |ui| {
@@ -172,6 +173,9 @@ impl eframe::App for TemplateApp {
                 });
             });
         }
+        
+        // Keep painting at least once a second to check for file changes
+        ctx.request_repaint_after(Duration::from_secs(1));
     }
 
     /// Called by the frame work to save state before shutdown.

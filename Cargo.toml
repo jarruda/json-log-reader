@@ -15,6 +15,7 @@ regex = "^1.10"
 grep = "^0.3"
 grep-regex = "^0.1"
 wasm-bindgen-futures = "0.4.42"
+notify = "^6.1"
 
 egui = { version = "^0.27", default-features = false, features = [
     "log",
@@ -37,6 +38,7 @@ serde = { version = "1", features = ["derive"] }
 
 puffin = "^0.19"
 puffin_http = "^0.16"
+crossbeam-channel = "0.5.13"
 
 [profile.release]
 opt-level = 2 # fast and small
