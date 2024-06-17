@@ -1,19 +1,19 @@
-use std::time::SystemTime;
 use std::{
     fs::File,
     io,
     path::{Path, PathBuf},
 };
+use std::time::SystemTime;
 
-use egui::{include_image, Button, CursorIcon, Ui};
-use grep::searcher::{sinks::Lossy, Searcher};
+use egui::{Button, CursorIcon, Ui};
+use grep::searcher::{Searcher, sinks::Lossy};
 use grep_regex::RegexMatcherBuilder;
 use log::error;
 
 use super::{
     log_entries_table::LogEntriesTable,
     log_file_reader::{LineNumber, LogFileReader},
-    log_view::{LogViewTabTrait, LogViewerState},
+    log_view::{LogViewerState, LogViewTabTrait},
 };
 
 #[derive(Debug)]
@@ -182,9 +182,9 @@ impl FilteredLogEntriesTab {
 impl LogViewTabTrait for FilteredLogEntriesTab {
     fn title(&self) -> egui::WidgetText {
         if self.search_term.is_empty() {
-            "Search".into()
+            "🔍 Search".into()
         } else {
-            format!("Search: {}", self.search_term).into()
+            format!("🔍 Search: {}", self.search_term).into()
         }
     }
 
@@ -215,10 +215,7 @@ impl LogViewTabTrait for FilteredLogEntriesTab {
             Some(&self.search_results),
             |ui| {
                 if ui
-                    .add(
-                        Button::image(include_image!("../../assets/icons8-repeat-24-white.png"))
-                            .selected(repeat_search),
-                    )
+                    .add(Button::new("⟳").selected(repeat_search))
                     .on_hover_cursor(CursorIcon::PointingHand)
                     .on_hover_text("Repeat Search on Change")
                     .clicked()

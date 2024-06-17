@@ -1,7 +1,7 @@
 use super::{
     log_entries_table::LogEntriesTable,
     log_file_reader::LogFileReader,
-    log_view::{LogViewTabTrait, LogViewerState},
+    log_view::{LogViewerState, LogViewTabTrait},
 };
 
 pub struct LogEntriesTab {
@@ -18,7 +18,7 @@ impl LogEntriesTab {
 
 impl LogViewTabTrait for LogEntriesTab {
     fn title(&self) -> egui::WidgetText {
-        "Log".into()
+        "📃 Log".into()
     }
 
     fn ui(

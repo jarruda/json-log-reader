@@ -1,5 +1,5 @@
 use egui::{
-    Button, Color32, CursorIcon, ImageSource, include_image, Response, RichText, Sense, Vec2,
+    Color32, CursorIcon, Response, RichText, Sense,
 };
 use egui_extras::{Column, TableBuilder};
 use egui_toast::ToastKind;
@@ -18,10 +18,10 @@ impl LogEntryContextTab {
 
     fn add_tool_button(
         ui: &mut egui::Ui,
-        image_source: ImageSource<'_>,
+        text: &str,
         hover_text: &str,
     ) -> Response {
-        ui.add_sized(Vec2::new(16.0, 16.0), Button::image(image_source))
+        ui.button(text)
             .on_hover_text(hover_text)
             .on_hover_cursor(CursorIcon::PointingHand)
     }
@@ -29,7 +29,7 @@ impl LogEntryContextTab {
 
 impl LogViewTabTrait for LogEntryContextTab {
     fn title(&self) -> egui::WidgetText {
-        "Context".into()
+        "📓 Context".into()
     }
 
     fn ui(
@@ -77,9 +77,7 @@ impl LogViewTabTrait for LogEntryContextTab {
                                 let column_is_shown =
                                     viewer_state.displayed_columns.iter().any(|s| s == key_str);
                                 if !column_is_shown {
-                                    let add_icon =
-                                        include_image!("../../assets/icons8-plus-24-white.png");
-                                    if Self::add_tool_button(ui, add_icon, "Add Column").clicked() {
+                                    if Self::add_tool_button(ui, "➕", "Add Column").clicked() {
                                         viewer_state.displayed_columns.push(key_str.to_string());
 
                                         viewer_state.add_toast(
@@ -94,9 +92,7 @@ impl LogViewTabTrait for LogEntryContextTab {
                                 ui.label(RichText::new(key_str).color(Color32::WHITE).monospace());
                             });
                             row.col(|ui| {
-                                let copy_icon =
-                                    include_image!("../../assets/icons8-duplicate-32-white.png");
-                                if Self::add_tool_button(ui, copy_icon, "Copy Value").clicked() {
+                                if Self::add_tool_button(ui, "🗐", "Copy Value").clicked() {
                                     ui.output_mut(|o| {
                                         o.copied_text = value_str.clone();
                                     });
