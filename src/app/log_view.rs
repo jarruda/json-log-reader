@@ -154,6 +154,10 @@ impl TabViewer for LogViewContext {
         tab.ui(ui, &mut self.log_file_reader, &mut self.viewer_state);
     }
 
+    fn id(&mut self, tab: &mut Self::Tab) -> Id {
+        Id::new(tab as *const _)
+    }
+
     fn add_popup(&mut self, ui: &mut Ui, surface_index: SurfaceIndex, node: NodeIndex) {
         ui.set_min_width(100.0);
 
@@ -164,6 +168,10 @@ impl TabViewer for LogViewContext {
         if ui.button("Context").clicked() {
             self.tabs_to_open
                 .push((LogEntryContextTab::new(), surface_index, node));
+        }
+        if ui.button("Search").clicked() {
+            self.tabs_to_open
+                .push((FilteredLogEntriesTab::new(self.log_file_path.clone()), surface_index, node));
         }
     }
 }

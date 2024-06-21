@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use egui::{RichText, Ui};
+use egui::{CursorIcon, RichText, Ui};
 use egui_dock::DockState;
 use rfd::FileDialog;
 
@@ -54,7 +54,7 @@ impl TemplateApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
-        
+
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
@@ -98,7 +98,7 @@ impl TemplateApp {
             .filter(|s| s.1.is_some())
             .map(|s| (s.0, s.1.unwrap().to_string_lossy()))
         {
-            if ui.button(file.1).clicked() {
+            if ui.button(file.1).on_hover_cursor(CursorIcon::PointingHand).clicked() {
                 return Some(file.0.to_path_buf());
             }
         }
@@ -153,16 +153,17 @@ impl eframe::App for TemplateApp {
             });
         });
 
-        if !self.tree.main_surface().is_empty() {
+        if self.tree.main_surface().num_tabs() > 0{
             egui_dock::DockArea::new(&mut self.tree).show(ctx, &mut LogViewTabViewer {})
         } else {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered_justified(|ui| {
                     ui.set_width(300.0);
                     ui.label(RichText::new("Welcome to JSON Log Viewer").strong());
-                    if ui.button("Open File...").clicked() {
+                    if ui.button("📂 Open File...").clicked() {
                         self.open_file(None);
                     }
+                    ui.separator();
                     ui.label("Recent Files");
                     ui.separator();
 
@@ -173,7 +174,7 @@ impl eframe::App for TemplateApp {
                 });
             });
         }
-        
+
         // Keep painting at least once a second to check for file changes
         ctx.request_repaint_after(Duration::from_secs(1));
     }
