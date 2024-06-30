@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use egui::{Align, Button, Color32, CursorIcon, Response, RichText, Ui};
+use egui::Frame;
 use egui_extras::{Column, TableBuilder, TableRow};
 use egui_toast::ToastKind;
 
@@ -94,15 +97,78 @@ impl LogEntriesTable {
             .header(24.0, |mut row| {
                 let columns_displayed_count = viewer_state.displayed_columns.len();
                 let mut columns_to_remove: Vec<String> = vec![];
+                let mut from: Option<Arc<String>> = None;
+                let mut to: Option<(String, usize)> = None;
+
                 for displayed_column in &viewer_state.displayed_columns {
                     row.col(|ui| {
-                        ui.label(RichText::new(displayed_column).strong());
+                        ui.dnd_drop_zone::<String, ()>(Frame::default(), |ui| {
+                            let response = ui
+                                .dnd_drag_source(
+                                    ui.id().with(displayed_column),
+                                    displayed_column.to_string(),
+                                    |ui| {
+                                        ui.set_min_width(50.0);
+                                        ui.label(RichText::new(displayed_column).strong());
+                                    },
+                                )
+                                .response;
+
+                            if let (Some(pointer), Some(hovered_payload)) = (
+                                ui.input(|i| i.pointer.interact_pos()),
+                                response.dnd_hover_payload::<String>(),
+                            ) {
+                                if &*hovered_payload != displayed_column {
+                                    let rect = response.rect;
+
+                                    // Preview insertion:
+                                    let stroke = egui::Stroke::new(5.0, Color32::GOLD);
+
+                                    let insert_col_idx = if pointer.x < rect.center().x {
+                                        // Insert before
+                                        ui.painter().vline(rect.left(), rect.y_range(), stroke);
+                                        0
+                                    } else {
+                                        // Insert after
+                                        ui.painter().vline(rect.right(), rect.y_range(), stroke);
+                                        1
+                                    };
+
+                                    if let Some(dragged_payload) = response.dnd_release_payload() {
+                                        // The user dropped onto this item.
+                                        from = Some(dragged_payload);
+                                        to = Some((displayed_column.clone(), insert_col_idx));
+                                    }
+                                }
+                            }
+                        });
+
                         if columns_displayed_count > 1 {
-                            if Self::add_tool_button(ui, "➖", "Remove Column").clicked() {
+                            if Self::add_tool_button(ui, "❌", "Remove Column").clicked() {
                                 columns_to_remove.push(displayed_column.clone());
                             }
                         }
                     });
+                }
+
+                if let (Some(ref from), Some(ref to)) = (from, to) {
+                    // Remove dragged column
+                    viewer_state
+                        .displayed_columns
+                        .iter()
+                        .position(|c| *c == **from)
+                        .map(|i| viewer_state.displayed_columns.remove(i));
+
+                    // Insert dragged column to new location
+                    viewer_state
+                        .displayed_columns
+                        .iter()
+                        .position(|c| *c == to.0)
+                        .map(|i| {
+                            viewer_state
+                                .displayed_columns
+                                .insert(i + to.1, from.to_string())
+                        });
                 }
 
                 if !columns_to_remove.is_empty() {
