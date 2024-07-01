@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use egui::{CursorIcon, RichText, Ui};
+use egui::{CursorIcon, Label, RichText, Ui};
 use egui_dock::DockState;
 use rfd::FileDialog;
 
@@ -98,7 +98,12 @@ impl TemplateApp {
             .filter(|s| s.1.is_some())
             .map(|s| (s.0, s.1.unwrap().to_string_lossy()))
         {
-            if ui.button(file.1).on_hover_cursor(CursorIcon::PointingHand).clicked() {
+            if ui
+                .button(file.1)
+                .on_hover_text(file.0.to_string_lossy())
+                .on_hover_cursor(CursorIcon::PointingHand)
+                .clicked()
+            {
                 return Some(file.0.to_path_buf());
             }
         }
@@ -121,12 +126,20 @@ impl eframe::App for TemplateApp {
                         ui.close_menu();
                     }
 
-                    ui.menu_button("Open Recent", |ui| {
-                        if let Some(ref file_to_open) = self.recent_file_menu(ui) {
-                            self.open_file(Some(&file_to_open));
-                            ui.close_menu();
-                        }
-                    });
+                    if self.recent_files.is_empty() {
+                        ui.add_enabled(false, Label::new("Open Recent"));
+                    } else {
+                        ui.menu_button("Open Recent", |ui| {
+                            if let Some(ref file_to_open) = self.recent_file_menu(ui) {
+                                self.open_file(Some(&file_to_open));
+                                ui.close_menu();
+                            }
+                        });
+                    }
+
+                    if ui.button("Clear Recent Files").clicked() {
+                        self.recent_files.clear();
+                    }
 
                     ui.separator();
 
@@ -153,7 +166,7 @@ impl eframe::App for TemplateApp {
             });
         });
 
-        if self.tree.main_surface().num_tabs() > 0{
+        if self.tree.main_surface().num_tabs() > 0 {
             egui_dock::DockArea::new(&mut self.tree).show(ctx, &mut LogViewTabViewer {})
         } else {
             egui::CentralPanel::default().show(ctx, |ui| {
