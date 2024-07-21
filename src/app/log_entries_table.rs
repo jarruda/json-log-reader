@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use egui::{Align, Button, Color32, CursorIcon, Response, RichText, Ui};
 use egui::Frame;
+use egui::{Align, Button, Color32, CursorIcon, Response, RichText, Ui};
 use egui_extras::{Column, TableBuilder, TableRow};
 use egui_toast::ToastKind;
 
+use crate::app::log_source::{LogSource, ReadEntryError};
 use crate::app::log_view::{ColumnTextColor, LogViewerState};
 
-use super::log_file_reader::{LineNumber, LogFileReader};
+use super::file_log_source::LineNumber;
 
 pub struct LogEntriesTable {
     selected_line: Option<usize>,
@@ -35,17 +36,13 @@ impl LogEntriesTable {
     pub fn ui(
         &mut self,
         ui: &mut Ui,
-        log_file_reader: &mut LogFileReader,
+        log_source: &mut dyn LogSource,
         viewer_state: &mut LogViewerState,
-        filtered_entries: Option<&[LineNumber]>,
         add_toolbar_contents: impl FnOnce(&mut Ui),
     ) {
-        self.toolbar_ui(ui, log_file_reader, viewer_state, add_toolbar_contents);
+        self.toolbar_ui(ui, add_toolbar_contents);
 
-        let total_rows = match filtered_entries {
-            Some(lines) => lines.len(),
-            None => log_file_reader.line_count(),
-        };
+        let total_rows = log_source.entry_count();
 
         let mut table_builder = TableBuilder::new(ui)
             .max_scroll_height(f32::INFINITY)
@@ -72,12 +69,15 @@ impl LogEntriesTable {
             table_builder = table_builder.column(col_desc);
         }
 
+        /* TODO
         if self.tail_log {
             if let Some(row) = self.last_row_index(log_file_reader, filtered_entries) {
                 table_builder = table_builder.scroll_to_row(row, Some(Align::BOTTOM));
             }
         }
-
+        */
+        
+        /* TODO fix line selection
         if self.sync_line_selection && self.selected_line != viewer_state.selected_line_num {
             if let Some(selected_line) = viewer_state.selected_line_num {
                 if let Some(selected_row) = self.find_row_for_line(selected_line, filtered_entries)
@@ -92,6 +92,7 @@ impl LogEntriesTable {
             }
             self.scroll_to_selected = false;
         }
+        */
 
         table_builder
             .header(24.0, |mut row| {
@@ -182,21 +183,18 @@ impl LogEntriesTable {
             .body(|body| {
                 body.rows(16.0, total_rows, |mut row| {
                     let row_idx = row.index();
-                    let line_number = match filtered_entries {
-                        Some(lines) => lines[row_idx],
-                        None => row_idx,
-                    };
 
-                    row.set_selected(self.selected_line == Some(line_number));
+                    Self::ui_logline(log_source, viewer_state, &mut row, row_idx);
 
-                    Self::ui_logline(log_file_reader, viewer_state, &mut row, line_number);
-
+                    /* TODO line selection
+                    row.set_selected(self.selected_line == Some(row_idx));
                     if row.response().clicked() {
                         self.selected_line = Some(line_number);
                         if self.sync_line_selection {
                             viewer_state.selected_line_num = self.selected_line;
                         }
                     }
+                    */
                 });
             });
     }
@@ -215,48 +213,36 @@ impl LogEntriesTable {
         }
     }
 
-    fn last_row_index(
-        &self,
-        log_file_reader: &LogFileReader,
-        filtered_entries: Option<&[LineNumber]>,
-    ) -> Option<usize> {
-        match filtered_entries {
-            Some(lines) => {
-                if lines.is_empty() {
-                    None
-                } else {
-                    Some(lines.len() - 1)
-                }
-            }
-            None => Some(log_file_reader.line_count() - 1),
-        }
-    }
-
     fn ui_logline(
-        log_file_reader: &mut LogFileReader,
+        log_source: &mut dyn LogSource,
         viewer_state: &mut LogViewerState,
         row: &mut TableRow<'_, '_>,
-        line_num: LineNumber,
-    ) -> Option<()> {
-        let log_line_opt = log_file_reader.read_line(line_num);
-
-        if log_line_opt.is_none() {
-            row.col(|ui| {
-                ui.label(
-                    RichText::new("⚠ Failed to read from log file.")
-                        .color(ui.visuals().warn_fg_color),
-                );
-            });
-            return None;
-        }
-
-        let log_line = log_line_opt.unwrap();
-
-        match LogFileReader::parse_logline(&log_line) {
-            Some(log_entry) => {
+        entry_index: usize,
+    ) {
+        log_source.use_entry(entry_index, &mut |entry| match entry {
+            Err(e) => match e {
+                ReadEntryError::ReadFailure => {
+                    row.col(|ui| {
+                        ui.label(
+                            RichText::new("⚠ Failed to read from log file.")
+                                .color(ui.visuals().warn_fg_color),
+                        );
+                    });
+                }
+                ReadEntryError::ParseFailure(raw_str) => {
+                    row.col(|ui| {
+                        ui.label(
+                            RichText::new(raw_str.trim())
+                                .monospace()
+                                .color(Color32::WHITE),
+                        );
+                    });
+                }
+            },
+            Ok(e) => {
                 for column_str in &viewer_state.displayed_columns {
                     row.col(|ui| {
-                        let column_value = &log_entry.object[column_str];
+                        let column_value = &e.object[column_str];
                         let full_col_text = if column_value.is_empty() {
                             String::new()
                         } else {
@@ -281,33 +267,16 @@ impl LogEntriesTable {
                         rich_text = match column_style.color {
                             ColumnTextColor::Color(color) => rich_text.color(color),
                             ColumnTextColor::BySeverity => rich_text.color(color_from_loglevel(
-                                log_entry.object["level"].as_str().unwrap_or("INFO"),
+                                e.object["level"].as_str().unwrap_or("INFO"),
                             )),
                         };
                         ui.label(rich_text);
                     });
                 }
             }
-            None => {
-                row.col(|ui| {
-                    ui.label(
-                        RichText::new(log_line.trim())
-                            .monospace()
-                            .color(Color32::WHITE),
-                    );
-                });
-            }
-        }
-
-        Some(())
+        });
     }
-    fn toolbar_ui(
-        &mut self,
-        ui: &mut Ui,
-        _log_file_reader: &mut LogFileReader,
-        _log_viewer_state: &mut LogViewerState,
-        add_toolbar_contents: impl FnOnce(&mut Ui) + Sized,
-    ) {
+    fn toolbar_ui(&mut self, ui: &mut Ui, add_toolbar_contents: impl FnOnce(&mut Ui) + Sized) {
         ui.horizontal(|ui| {
             if ui
                 .add(Button::new("⏬").selected(self.tail_log))

@@ -1,13 +1,10 @@
-use egui::{
-    Color32, CursorIcon, Response, RichText, Sense,
+use super::{
+    log_view::{LogViewTabTrait, LogViewerState},
 };
+use crate::app::log_source::{LogEntry, LogSource};
+use egui::{Color32, CursorIcon, Response, RichText, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
 use egui_toast::ToastKind;
-
-use super::{
-    log_file_reader::LogFileReader,
-    log_view::{LogViewerState, LogViewTabTrait},
-};
 
 pub struct LogEntryContextTab {}
 
@@ -16,43 +13,15 @@ impl LogEntryContextTab {
         Box::new(Self {})
     }
 
-    fn add_tool_button(
-        ui: &mut egui::Ui,
-        text: &str,
-        hover_text: &str,
-    ) -> Response {
+    fn add_tool_button(ui: &mut Ui, text: &str, hover_text: &str) -> Response {
         ui.button(text)
             .on_hover_text(hover_text)
             .on_hover_cursor(CursorIcon::PointingHand)
     }
-}
 
-impl LogViewTabTrait for LogEntryContextTab {
-    fn title(&self) -> egui::WidgetText {
-        "📓 Context".into()
-    }
-
-    fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        log_reader: &mut LogFileReader,
-        viewer_state: &mut LogViewerState,
-    ) {
-        if viewer_state.selected_line_num.is_none() {
-            ui.label("Select an entry.");
-            return;
-        }
-
-        let read_log_entry = log_reader.read_entry(viewer_state.selected_line_num.unwrap());
-        if read_log_entry.is_none() {
-            ui.label("Failed to read entry.");
-            return;
-        }
-
+    fn ui_entry(&mut self, ui: &mut Ui, entry: &LogEntry, viewer_state: &mut LogViewerState) {
         let row_height_padding = 6.0;
         let row_content_height = 14.0;
-
-        let log_entry = read_log_entry.unwrap();
 
         TableBuilder::new(ui)
             .striped(true)
@@ -66,7 +35,7 @@ impl LogViewTabTrait for LogEntryContextTab {
             .column(Column::auto())
             .column(Column::remainder())
             .body(|mut body| {
-                for entry in log_entry.object.entries() {
+                for entry in entry.object.entries() {
                     let key_str = entry.0;
                     let value_str = entry.1.to_string();
                     let line_count = value_str.chars().filter(|c| *c == '\n').count() + 1;
@@ -111,5 +80,34 @@ impl LogViewTabTrait for LogEntryContextTab {
                     );
                 }
             });
+    }
+}
+
+impl LogViewTabTrait for LogEntryContextTab {
+    fn title(&self) -> egui::WidgetText {
+        "📓 Context".into()
+    }
+
+    fn ui(
+        &mut self,
+        ui: &mut Ui,
+        log_source: &mut dyn LogSource,
+        viewer_state: &mut LogViewerState,
+    ) {
+        if viewer_state.selected_line_num.is_none() {
+            ui.label("Select an entry.");
+            return;
+        }
+
+        let selected_index = viewer_state.selected_line_num.unwrap();
+
+        log_source.use_entry(selected_index, &mut |e| match e {
+            Ok(e) => {
+                self.ui_entry(ui, e, viewer_state);
+            }
+            Err(_) => {
+                ui.label("Failed to read entry.");
+            }
+        });
     }
 }

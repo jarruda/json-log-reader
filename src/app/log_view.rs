@@ -1,22 +1,17 @@
 use std::collections::HashMap;
 use std::default::Default;
-use std::time::SystemTime;
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use std::ops::DerefMut;
+use std::sync::{Arc, Mutex};
 
 use egui::{Align2, Color32, Direction, Id, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, NodeIndex, SurfaceIndex, TabViewer};
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
-use log::{error, info};
 
-use super::log_file_reader::LogFileReader;
+use crate::app::log_source::LogSource;
+
 use super::{
-    filtered_log_entries_tab::FilteredLogEntriesTab,
-    log_entries_tab::LogEntriesTab,
-    log_entry_context_tab::LogEntryContextTab,
-    log_file_reader::{LineNumber},
+    file_log_source::LineNumber, filtered_log_entries_tab::FilteredLogEntriesTab,
+    log_entries_tab::LogEntriesTab, log_entry_context_tab::LogEntryContextTab,
 };
 
 #[derive(Default)]
@@ -28,8 +23,6 @@ impl PartialEq for FilteredLogEntriesTabState {
         return self == other;
     }
 }
-
-pub struct LogSource {}
 
 pub struct LogViewerState {
     pub selected_line_num: Option<LineNumber>,
@@ -118,11 +111,11 @@ impl Default for &'static ColumnStyle {
 }
 
 pub trait LogViewTabTrait {
-    fn title(&self) -> egui::WidgetText;
+    fn title(&self) -> WidgetText;
     fn ui(
         &mut self,
         ui: &mut Ui,
-        log_reader: &mut LogFileReader,
+        log_source: &mut dyn LogSource,
         viewer_state: &mut LogViewerState,
     );
 }
@@ -131,14 +124,20 @@ pub trait LogViewTabTrait {
 /// to view and interact with a log file.
 /// Tabs are one of the LogViewTab enum.
 pub struct LogView {
+    id: Id,
+    title: String,
     tree: DockState<Box<dyn LogViewTabTrait>>,
     log_view_context: LogViewContext,
-    file_path: PathBuf,
+}
+
+impl LogView {
+    pub fn title(&self) -> String {
+        self.title.clone()
+    }
 }
 
 struct LogViewContext {
-    log_file_path: PathBuf,
-    log_file_reader: LogFileReader,
+    log_source: Arc<Mutex<dyn LogSource>>,
     tabs_to_open: Vec<(Box<dyn LogViewTabTrait>, SurfaceIndex, NodeIndex)>,
     viewer_state: LogViewerState,
 }
@@ -146,12 +145,13 @@ struct LogViewContext {
 impl TabViewer for LogViewContext {
     type Tab = Box<dyn LogViewTabTrait>;
 
-    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+    fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
         tab.title()
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
-        tab.ui(ui, &mut self.log_file_reader, &mut self.viewer_state);
+        let mut guard = self.log_source.lock().unwrap();
+        tab.ui(ui, guard.deref_mut(), &mut self.viewer_state);
     }
 
     fn id(&mut self, tab: &mut Self::Tab) -> Id {
@@ -171,13 +171,13 @@ impl TabViewer for LogViewContext {
         }
         if ui.button("Search").clicked() {
             self.tabs_to_open
-                .push((FilteredLogEntriesTab::new(self.log_file_path.clone()), surface_index, node));
+                .push((FilteredLogEntriesTab::new(), surface_index, node));
         }
     }
 }
 
 impl LogView {
-    pub fn open(file_path: &Path) -> io::Result<Self> {
+    pub fn new(log_source: Arc<Mutex<dyn LogSource>>) -> Self {
         let mut tree: DockState<Box<dyn LogViewTabTrait>> =
             DockState::new(vec![LogEntriesTab::new()]);
         let new_nodes = tree.main_surface_mut().split_below(
@@ -185,24 +185,25 @@ impl LogView {
             0.8,
             vec![LogEntryContextTab::new()],
         );
-        tree.main_surface_mut().split_right(
-            new_nodes[1],
-            0.5,
-            vec![FilteredLogEntriesTab::new(file_path.to_owned())],
-        );
+        tree.main_surface_mut()
+            .split_right(new_nodes[1], 0.5, vec![FilteredLogEntriesTab::new()]);
 
-        Ok(LogView {
+        let ls = log_source.lock().unwrap();
+        let id = Id::new(ls.uri());
+        let title = ls.name();
+        drop(ls);
+
+        LogView {
+            id,
+            title,
             tree,
-            file_path: file_path.to_owned(),
-            log_view_context: LogViewContext::open(file_path)?,
-        })
-    }
-
-    pub fn file_path(&self) -> &Path {
-        &self.file_path
+            log_view_context: LogViewContext::new(log_source),
+        }
     }
 
     pub fn ui(self: &mut Self, ui: &mut Ui) {
+        // TODO: async log source synchronization point
+        /*
         if self.log_view_context.log_file_reader.has_changed() {
             info!(
                 "File updated, reloading. {:?}",
@@ -216,13 +217,16 @@ impl LogView {
                 );
             }
         }
+        */
 
+        // Show all tabs
         DockArea::new(&mut self.tree)
-            .id(Id::new(&self.file_path))
+            .id(self.id)
             .show_add_buttons(true)
             .show_add_popup(true)
             .show_inside(ui, &mut self.log_view_context);
 
+        // Deferred tab additions
         for (tab_type, destination_surface, destination_node) in
             self.log_view_context.tabs_to_open.drain(..)
         {
@@ -231,6 +235,7 @@ impl LogView {
             self.tree.push_to_focused_leaf(tab_type);
         }
 
+        // Toasts display
         self.log_view_context.viewer_state.toasts.show(ui.ctx());
     }
 
@@ -240,50 +245,19 @@ impl LogView {
 }
 
 impl LogViewContext {
-    pub fn open(filepath: &Path) -> io::Result<Self> {
-        puffin::profile_function!();
-
-        let mut log_view = LogViewContext {
-            log_file_path: filepath.to_owned(),
-            log_file_reader: LogFileReader::open(filepath)?,
+    pub fn new(log_source: Arc<Mutex<dyn LogSource>>) -> Self {
+        LogViewContext {
+            log_source,
             tabs_to_open: vec![],
             viewer_state: Default::default(),
-        };
-
-        let load_start_time = SystemTime::now();
-
-        match log_view.log_file_reader.load() {
-            Ok(line_count) => {
-                log_view.viewer_state.add_toast(
-                    ToastKind::Info,
-                    format!(
-                        "File load complete. Loaded {} lines in {:?}.",
-                        line_count,
-                        load_start_time.elapsed().unwrap()
-                    )
-                    .into(),
-                    10.0,
-                );
-            }
-            Err(e) => {
-                log_view.viewer_state.add_toast(
-                    ToastKind::Error,
-                    format!("Failed to load lines from file: {}", e).into(),
-                    10.0,
-                );
-            }
         }
-        Ok(log_view)
     }
 
     pub fn open_search(&mut self) {
         let dest_surface = SurfaceIndex::main();
         let dest_node = NodeIndex::root().right();
 
-        self.tabs_to_open.push((
-            FilteredLogEntriesTab::new(self.log_file_path.clone()),
-            dest_surface,
-            dest_node,
-        ));
+        self.tabs_to_open
+            .push((FilteredLogEntriesTab::new(), dest_surface, dest_node));
     }
 }

@@ -4,15 +4,16 @@ use std::time::Duration;
 use egui::{CursorIcon, Label, RichText, Ui};
 use egui_dock::DockState;
 use rfd::FileDialog;
-
+use crate::app::file_log_source::FileLogSource;
 use self::log_view::LogView;
 
 pub mod filtered_log_entries_tab;
 pub mod log_entries_tab;
 pub mod log_entries_table;
 pub mod log_entry_context_tab;
-pub mod log_file_reader;
+pub mod file_log_source;
 pub mod log_view;
+mod log_source;
 
 struct LogViewTabViewer;
 
@@ -20,10 +21,7 @@ impl egui_dock::TabViewer for LogViewTabViewer {
     type Tab = LogView;
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        match tab.file_path().file_name() {
-            Some(file_name) => file_name.to_string_lossy().into(),
-            None => "Error".into(),
-        }
+        tab.title().into()
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
@@ -77,13 +75,15 @@ impl TemplateApp {
         let file_to_open = match file_path {
             Some(existing_path) => Some(existing_path.to_owned()),
             None => FileDialog::new()
-                .add_filter("JSON Logs", &["log", "json"])
+                .add_filter("JSON Logs", &["log", "json", "jsonl"])
                 .add_filter("Any", &["*"])
                 .pick_file(),
         };
 
         if let Some(ref file_path) = file_to_open {
-            self.tree.push_to_first_leaf(LogView::open(file_path).ok()?);
+            // TODO: emit error
+            let file_source = FileLogSource::open(file_path).ok()?;
+            self.tree.push_to_first_leaf(LogView::new(file_source));
             self.add_recent_file(file_path);
         }
 

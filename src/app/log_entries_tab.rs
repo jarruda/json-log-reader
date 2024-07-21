@@ -1,8 +1,9 @@
 use super::{
     log_entries_table::LogEntriesTable,
-    log_file_reader::LogFileReader,
-    log_view::{LogViewerState, LogViewTabTrait},
+    log_view::{LogViewTabTrait, LogViewerState},
 };
+use crate::app::log_source::LogSource;
+use egui::Ui;
 
 pub struct LogEntriesTab {
     log_entries_table: LogEntriesTable,
@@ -23,11 +24,11 @@ impl LogViewTabTrait for LogEntriesTab {
 
     fn ui(
         &mut self,
-        ui: &mut egui::Ui,
-        log_reader: &mut LogFileReader,
+        ui: &mut Ui,
+        log_source: &mut dyn LogSource,
         viewer_state: &mut LogViewerState,
     ) {
         self.log_entries_table
-            .ui(ui, log_reader, viewer_state, None, |_| {});
+            .ui(ui, log_source, viewer_state, |_| {});
     }
 }
