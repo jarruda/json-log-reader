@@ -1,10 +1,5 @@
-use crate::app::log_source::{LogEntry, LogSource, ReadEntryError, SearchOptions};
-use crossbeam_channel::Receiver;
-use grep::searcher::sinks::Lossy;
-use grep::searcher::{Searcher, Sink, SinkMatch};
-use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use io::Error;
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::SystemTime;
@@ -13,6 +8,14 @@ use std::{
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::Path,
 };
+
+use crossbeam_channel::Receiver;
+use grep::searcher::sinks::Lossy;
+use grep::searcher::{Searcher, Sink, SinkMatch};
+use grep_regex::{RegexMatcher, RegexMatcherBuilder};
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+
+use crate::app::log_source::{LogEntry, LogEntryId, LogSource, ReadEntryError, SearchOptions};
 
 fn to_io_error(err: notify::Error) -> Error {
     Error::new(io::ErrorKind::Other, err)
@@ -44,6 +47,7 @@ pub struct FileLogSource {
     line_map: Vec<FileOffset>,
     file_size: FileOffset,
     load_time_point: Option<SystemTime>,
+    read_line_buffer: Vec<u8>,
     _watcher: Box<dyn Watcher>,
     watcher_recv: Receiver<notify::Result<Event>>,
 }
@@ -67,6 +71,7 @@ impl FileLogSource {
                 line_map: Vec::new(),
                 file_size: 0,
                 load_time_point: None,
+                read_line_buffer: vec![],
                 _watcher: Box::new(watcher),
                 watcher_recv: rx,
             })
@@ -122,11 +127,28 @@ impl FileLogSource {
             .seek(SeekFrom::Start(file_start_offset))
             .ok()?;
 
-        // non-ideal, pre-populates vector with 0s
-        let mut line_bytes: Vec<u8> = vec![0u8; (file_end_offset - file_start_offset) as usize];
-        self.buf_reader.read_exact(&mut line_bytes).ok()?;
+        self.read_line_buffer.clear();
+        self.read_line_buffer
+            .resize((file_end_offset - file_start_offset) as usize, 0);
+        self.buf_reader
+            .read_exact(&mut self.read_line_buffer)
+            .ok()?;
 
-        Some(String::from_utf8_lossy(&line_bytes).to_string())
+        Some(String::from_utf8_lossy(&self.read_line_buffer).to_string())
+    }
+
+    /// Reads a line from the file parsed as a UTF8 string
+    pub fn read_line_from_offset(
+        reader: &mut BufReader<File>,
+        file_offset: &FileOffset,
+        line_buffer: &mut Vec<u8>,
+    ) -> Option<String> {
+        reader.seek(SeekFrom::Start(*file_offset)).ok()?;
+
+        line_buffer.clear();
+        reader.read_until(b'\n', line_buffer).ok()?;
+
+        Some(String::from_utf8_lossy(&line_buffer).to_string())
     }
 
     /// Parses a JSON object from the given string slice
@@ -136,10 +158,7 @@ impl FileLogSource {
         let log_entry = json::parse(line).ok()?;
 
         if log_entry.is_object() {
-            Some(LogEntry {
-                timestamp: log_entry["t"].as_str()?.to_owned(),
-                object: log_entry,
-            })
+            Some(LogEntry { object: log_entry })
         } else {
             None
         }
@@ -213,6 +232,26 @@ impl LogSource for FileLogSource {
         search_options: SearchOptions,
     ) -> Arc<Mutex<dyn LogSource>> {
         FilteredFileLogSource::new(self.file_path.clone(), search_query, search_options)
+    }
+
+    fn find_entry_index(&mut self, entry_id: &LogEntryId) -> Option<usize> {
+        let search_result = self.line_map.binary_search_by_key(entry_id, |file_offset| {
+            let line = Self::read_line_from_offset(
+                &mut self.buf_reader,
+                file_offset,
+                &mut self.read_line_buffer,
+            );
+            let entry = match line {
+                None => None,
+                Some(ref line) => Self::parse_logline(line),
+            };
+            match entry {
+                None => Default::default(),
+                Some(ref entry) => entry.into(),
+            }
+        });
+
+        search_result.ok()
     }
 }
 
@@ -335,5 +374,25 @@ impl LogSource for FilteredFileLogSource {
             .lock()
             .unwrap()
             .filter_entries(search_query, search_options)
+    }
+
+    fn find_entry_index(&mut self, entry_id: &LogEntryId) -> Option<usize> {
+        let mut source = self.file_log_source.lock().unwrap();
+
+        let search_result = self
+            .search_results
+            .binary_search_by_key(entry_id, |line_num| {
+                let line = source.read_line(*line_num);
+                let entry = match line {
+                    None => None,
+                    Some(ref line) => FileLogSource::parse_logline(line),
+                };
+                match entry {
+                    None => Default::default(),
+                    Some(ref entry) => entry.into(),
+                }
+            });
+
+        search_result.ok()
     }
 }

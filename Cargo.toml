@@ -16,6 +16,7 @@ grep = "^0.3"
 grep-regex = "^0.1"
 wasm-bindgen-futures = "0.4.42"
 notify = "^6.1"
+chrono = "^0.4"
 
 egui = { version = "^0.27", default-features = false, features = [
     "log",

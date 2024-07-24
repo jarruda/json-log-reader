@@ -7,11 +7,11 @@ use egui::{Align2, Color32, Direction, Id, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, NodeIndex, SurfaceIndex, TabViewer};
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 
-use crate::app::log_source::LogSource;
+use crate::app::log_source::{LogEntryId, LogSource};
 
 use super::{
-    file_log_source::LineNumber, filtered_log_entries_tab::FilteredLogEntriesTab,
-    log_entries_tab::LogEntriesTab, log_entry_context_tab::LogEntryContextTab,
+    filtered_log_entries_tab::FilteredLogEntriesTab, log_entries_tab::LogEntriesTab,
+    log_entry_context_tab::LogEntryContextTab,
 };
 
 #[derive(Default)]
@@ -25,7 +25,7 @@ impl PartialEq for FilteredLogEntriesTabState {
 }
 
 pub struct LogViewerState {
-    pub selected_line_num: Option<LineNumber>,
+    pub selected_entry: Option<LogEntryId>,
     pub displayed_columns: Vec<String>,
     pub column_styles: HashMap<String, ColumnStyle>,
     pub toasts: Toasts,
@@ -64,7 +64,7 @@ impl Default for ColumnStyle {
 impl Default for LogViewerState {
     fn default() -> Self {
         Self {
-            selected_line_num: None,
+            selected_entry: None,
             displayed_columns: vec!["t".into(), "tag".into(), "message".into()],
             column_styles: HashMap::from([
                 (

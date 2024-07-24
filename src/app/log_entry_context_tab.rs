@@ -1,16 +1,18 @@
-use super::{
-    log_view::{LogViewTabTrait, LogViewerState},
-};
-use crate::app::log_source::{LogEntry, LogSource};
+use super::log_view::{LogViewTabTrait, LogViewerState};
+use crate::app::log_source::{LogEntry, LogEntryId, LogSource};
 use egui::{Color32, CursorIcon, Response, RichText, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
 use egui_toast::ToastKind;
 
-pub struct LogEntryContextTab {}
+pub struct LogEntryContextTab {
+    current_selection: (Option<LogEntryId>, usize),
+}
 
 impl LogEntryContextTab {
     pub fn new() -> Box<Self> {
-        Box::new(Self {})
+        Box::new(Self {
+            current_selection: Default::default(),
+        })
     }
 
     fn add_tool_button(ui: &mut Ui, text: &str, hover_text: &str) -> Response {
@@ -94,14 +96,24 @@ impl LogViewTabTrait for LogEntryContextTab {
         log_source: &mut dyn LogSource,
         viewer_state: &mut LogViewerState,
     ) {
-        if viewer_state.selected_line_num.is_none() {
+        if self.current_selection.0 != viewer_state.selected_entry {
+            self.current_selection = match viewer_state.selected_entry {
+                None => (None, 0),
+                Some(ref selected_entry_id) => {
+                    match log_source.find_entry_index(selected_entry_id) {
+                        None => (None, 0),
+                        Some(entry_index) => (viewer_state.selected_entry.clone(), entry_index),
+                    }
+                }
+            };
+        }
+
+        if self.current_selection.0.is_none() {
             ui.label("Select an entry.");
             return;
         }
 
-        let selected_index = viewer_state.selected_line_num.unwrap();
-
-        log_source.use_entry(selected_index, &mut |e| match e {
+        log_source.use_entry(self.current_selection.1, &mut |e| match e {
             Ok(e) => {
                 self.ui_entry(ui, e, viewer_state);
             }

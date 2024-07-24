@@ -5,14 +5,11 @@ use egui::{Align, Button, Color32, CursorIcon, Response, RichText, Ui};
 use egui_extras::{Column, TableBuilder, TableRow};
 use egui_toast::ToastKind;
 
-use crate::app::log_source::{LogSource, ReadEntryError};
+use crate::app::log_source::{LogEntryId, LogSource, ReadEntryError};
 use crate::app::log_view::{ColumnTextColor, LogViewerState};
 
-use super::file_log_source::LineNumber;
-
 pub struct LogEntriesTable {
-    selected_line: Option<usize>,
-    scroll_to_selected: bool,
+    selected_entry: Option<LogEntryId>,
     sync_line_selection: bool,
     tail_log: bool,
 }
@@ -26,8 +23,7 @@ impl LogEntriesTable {
 
     pub fn new() -> Self {
         Self {
-            selected_line: None,
-            scroll_to_selected: false,
+            selected_entry: None,
             sync_line_selection: true,
             tail_log: false,
         }
@@ -69,20 +65,17 @@ impl LogEntriesTable {
             table_builder = table_builder.column(col_desc);
         }
 
-        /* TODO
         if self.tail_log {
-            if let Some(row) = self.last_row_index(log_file_reader, filtered_entries) {
-                table_builder = table_builder.scroll_to_row(row, Some(Align::BOTTOM));
+            let entry_count = log_source.entry_count();
+            if entry_count > 0 {
+                table_builder = table_builder.scroll_to_row(entry_count - 1, Some(Align::BOTTOM));
             }
         }
-        */
-        
-        /* TODO fix line selection
-        if self.sync_line_selection && self.selected_line != viewer_state.selected_line_num {
-            if let Some(selected_line) = viewer_state.selected_line_num {
-                if let Some(selected_row) = self.find_row_for_line(selected_line, filtered_entries)
-                {
-                    self.selected_line = viewer_state.selected_line_num;
+
+        if self.sync_line_selection && self.selected_entry != viewer_state.selected_entry {
+            if let Some(ref selected_entry) = viewer_state.selected_entry {
+                if let Some(selected_row) = log_source.find_entry_index(selected_entry) {
+                    self.selected_entry = viewer_state.selected_entry.clone();
 
                     if !self.tail_log {
                         table_builder =
@@ -90,9 +83,7 @@ impl LogEntriesTable {
                     }
                 }
             }
-            self.scroll_to_selected = false;
         }
-        */
 
         table_builder
             .header(24.0, |mut row| {
@@ -184,36 +175,13 @@ impl LogEntriesTable {
                 body.rows(16.0, total_rows, |mut row| {
                     let row_idx = row.index();
 
-                    Self::ui_logline(log_source, viewer_state, &mut row, row_idx);
-
-                    /* TODO line selection
-                    row.set_selected(self.selected_line == Some(row_idx));
-                    if row.response().clicked() {
-                        self.selected_line = Some(line_number);
-                        if self.sync_line_selection {
-                            viewer_state.selected_line_num = self.selected_line;
-                        }
-                    }
-                    */
+                    self.ui_logline(log_source, viewer_state, &mut row, row_idx);
                 });
             });
     }
 
-    /// Maps a line number to a table row.
-    /// If there is a set of filtered lines set, a binary search is performed to
-    /// find the correct row. Otherwise, the line number is returned as the row.
-    fn find_row_for_line(
-        &self,
-        line_number: LineNumber,
-        filtered_entries: Option<&[LineNumber]>,
-    ) -> Option<usize> {
-        match filtered_entries {
-            Some(lines) => Some(lines.binary_search(&line_number).ok()?),
-            None => Some(line_number),
-        }
-    }
-
     fn ui_logline(
+        &mut self,
         log_source: &mut dyn LogSource,
         viewer_state: &mut LogViewerState,
         row: &mut TableRow<'_, '_>,
@@ -239,10 +207,14 @@ impl LogEntriesTable {
                     });
                 }
             },
-            Ok(e) => {
+            Ok(entry) => {
+                // TODO optimize conversion to Id
+                let log_entry_id = Some(LogEntryId::from(entry));
+                row.set_selected(self.selected_entry == log_entry_id);
+                
                 for column_str in &viewer_state.displayed_columns {
                     row.col(|ui| {
-                        let column_value = &e.object[column_str];
+                        let column_value = &entry.object[column_str];
                         let full_col_text = if column_value.is_empty() {
                             String::new()
                         } else {
@@ -267,11 +239,18 @@ impl LogEntriesTable {
                         rich_text = match column_style.color {
                             ColumnTextColor::Color(color) => rich_text.color(color),
                             ColumnTextColor::BySeverity => rich_text.color(color_from_loglevel(
-                                e.object["level"].as_str().unwrap_or("INFO"),
+                                entry.object["level"].as_str().unwrap_or("INFO"),
                             )),
                         };
                         ui.label(rich_text);
                     });
+                }
+                
+                if row.response().clicked() {
+                    self.selected_entry = log_entry_id;
+                    if self.sync_line_selection {
+                        viewer_state.selected_entry = self.selected_entry.clone();
+                    }
                 }
             }
         });
