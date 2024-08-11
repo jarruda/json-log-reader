@@ -1,21 +1,26 @@
+use crate::app::file_log_source::LogFileSourceOperation::LoadFileMetadata;
+use crate::app::log_source::{LogEntry, LogEntryId, LogSource, ReadEntryError, SearchOptions};
+use crossbeam_channel::{Receiver, Sender};
+use grep::searcher::sinks::Lossy;
+use grep::searcher::{Searcher, Sink, SinkMatch};
+use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use io::Error;
+use log::{debug, error};
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::io::BufRead;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, Weak};
-use std::time::SystemTime;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, SystemTime};
 use std::{
     fs::File,
     io::{self, BufReader, Read, Seek, SeekFrom},
     path::Path,
 };
 
-use crossbeam_channel::Receiver;
-use grep::searcher::sinks::Lossy;
-use grep::searcher::{Searcher, Sink, SinkMatch};
-use grep_regex::{RegexMatcher, RegexMatcherBuilder};
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
-
-use crate::app::log_source::{LogEntry, LogEntryId, LogSource, ReadEntryError, SearchOptions};
+enum LogFileSourceOperation {
+    LoadFileMetadata((File, Vec<FileOffset>, Duration)),
+}
 
 fn to_io_error(err: notify::Error) -> Error {
     Error::new(io::ErrorKind::Other, err)
@@ -41,96 +46,118 @@ where
 }
 
 pub struct FileLogSource {
-    arc_weak: Weak<Mutex<Self>>,
     file_path: PathBuf,
-    buf_reader: BufReader<File>,
+    file_reader: Option<BufReader<File>>,
     line_map: Vec<FileOffset>,
     file_size: FileOffset,
+    load_duration: Duration,
     load_time_point: Option<SystemTime>,
     read_line_buffer: Vec<u8>,
-    _watcher: Box<dyn Watcher>,
+    _watcher: Arc<Mutex<dyn Watcher>>,
     watcher_recv: Receiver<notify::Result<Event>>,
+    op_recv: Receiver<LogFileSourceOperation>,
+    op_send: Sender<LogFileSourceOperation>,
 }
 
 impl FileLogSource {
     pub fn open(path: &Path) -> io::Result<Arc<Mutex<FileLogSource>>> {
-        // sync_channel of 0 makes it a "rendezvous" channel where the watching thread hands off to receiver
-        let (tx, rx) = crossbeam_channel::bounded(0);
+        let (op_tx, op_rx) = crossbeam_channel::bounded(100);
 
-        let mut watcher = RecommendedWatcher::new(tx, Config::default()).map_err(to_io_error)?;
+        // sync_channel of 0 makes it a "rendezvous" channel where the watching thread hands off to receiver
+        let (watcher_tx, watcher_rx) = crossbeam_channel::bounded(0);
+        let mut watcher =
+            RecommendedWatcher::new(watcher_tx, Config::default()).map_err(to_io_error)?;
         watcher
             .watch(path, RecursiveMode::NonRecursive)
             .map_err(to_io_error)?;
 
-        let file = File::open(path)?;
-        let log_source = Arc::new_cyclic(|weak| {
-            Mutex::new(FileLogSource {
-                arc_weak: weak.clone(),
-                file_path: path.to_path_buf(),
-                buf_reader: BufReader::new(file),
-                line_map: Vec::new(),
-                file_size: 0,
-                load_time_point: None,
-                read_line_buffer: vec![],
-                _watcher: Box::new(watcher),
-                watcher_recv: rx,
-            })
-        });
-        log_source.lock().unwrap().load()?;
+        let log_source = Arc::new(Mutex::new(FileLogSource {
+            file_path: path.to_path_buf(),
+            file_reader: None,
+            line_map: Vec::new(),
+            file_size: 0,
+            load_duration: Default::default(),
+            load_time_point: None,
+            read_line_buffer: vec![],
+            _watcher: Arc::new(Mutex::new(watcher)),
+            watcher_recv: watcher_rx,
+            op_recv: op_rx,
+            op_send: op_tx,
+        }));
+        
+        log_source.lock().unwrap().load_async();
+
         Ok(log_source)
     }
-
+    
     /// Reads the entire file to count the number of lines.
     /// Caches a map of line numbers to file positions.
     /// Returns the number of lines in the file if successful, error otherwise.
-    pub fn load(&mut self) -> io::Result<usize> {
+    fn load_line_map(file_path: &Path) -> io::Result<(File, Vec<FileOffset>, Duration)> {
         puffin::profile_function!();
 
-        self.buf_reader.rewind()?;
-        self.line_map.clear();
+        let load_start_time = SystemTime::now();
 
         // Build a grep matcher and searcher matching the options
         let newline = "$";
-        let matcher = RegexMatcher::new_line_matcher(&newline).unwrap();
+        let matcher =
+            RegexMatcher::new_line_matcher(&newline).expect("Failed to build a newline matcher.");
         let mut searcher = Searcher::new();
 
         // Load all newline file positions into line_map
-        searcher.search_reader(
+        let mut line_map = vec![];
+        searcher.search_path(
             matcher,
-            self.buf_reader.get_ref(),
+            file_path,
             AbsolutePositionSink(|file_offset| -> Result<bool, Error> {
-                self.line_map.push(file_offset as FileOffset);
+                line_map.push(file_offset as FileOffset);
                 Ok(true)
             }),
         )?;
 
-        self.buf_reader.seek(SeekFrom::End(0))?;
-        self.file_size = self.buf_reader.stream_position()?;
-        self.line_map.push(self.file_size);
+        let file = File::open(file_path)?;
+        let file_size = file.metadata()?.len();
+        line_map.push(file_size);
 
+        Ok((file, line_map, load_start_time.elapsed().unwrap()))
+    }
+
+    fn load_async(&mut self) {
+        let file_pathbuf = self.file_path.clone();
+        let op_tx = self.op_send.clone();
+        
+        thread::spawn(move || match Self::load_line_map(&file_pathbuf) {
+            Ok((file, line_map, load_time)) => {
+                if let Err(e) = op_tx.send(LoadFileMetadata((file, line_map, load_time))) {
+                    error!("Failed to send file metadata to log source. {:?}", e);
+                }
+            }
+            Err(e) => {
+                error!("Failed to load file - {:?}", e);
+            }
+        });
+    }
+    
+    pub fn load(&mut self, file: File, line_map: Vec<FileOffset>, load_time: Duration) {
+        self.file_reader = Some(BufReader::new(file));
+        self.line_map = line_map;
+        self.load_duration = load_time;
         self.load_time_point = Some(SystemTime::now());
-        Ok(self.entry_count())
-    }
-
-    pub fn has_changed(&mut self) -> bool {
-        self.watcher_recv.try_recv().is_ok()
-    }
-
-    pub fn load_time_point(&self) -> Option<SystemTime> {
-        self.load_time_point
     }
 
     /// Reads a line from the file parsed as a UTF8 string
     pub fn read_line(&mut self, line_num: LineNumber) -> Option<String> {
         let (file_start_offset, file_end_offset) = self.line_file_offsets(line_num);
-        self.buf_reader
+        
+        let file_reader = self.file_reader.as_mut()?;
+        file_reader
             .seek(SeekFrom::Start(file_start_offset))
             .ok()?;
 
         self.read_line_buffer.clear();
         self.read_line_buffer
             .resize((file_end_offset - file_start_offset) as usize, 0);
-        self.buf_reader
+        file_reader
             .read_exact(&mut self.read_line_buffer)
             .ok()?;
 
@@ -203,7 +230,11 @@ impl LogSource for FileLogSource {
     }
 
     fn entry_count(&mut self) -> usize {
-        self.line_map.len() - 1
+        if self.line_map.is_empty() {
+            0
+        } else {
+            self.line_map.len() - 1
+        }
     }
 
     fn use_entry(
@@ -235,9 +266,10 @@ impl LogSource for FileLogSource {
     }
 
     fn find_entry_index(&mut self, entry_id: &LogEntryId) -> Option<usize> {
+        let file_reader = self.file_reader.as_mut()?;
         let search_result = self.line_map.binary_search_by_key(entry_id, |file_offset| {
             let line = Self::read_line_from_offset(
-                &mut self.buf_reader,
+                file_reader,
                 file_offset,
                 &mut self.read_line_buffer,
             );
@@ -253,12 +285,32 @@ impl LogSource for FileLogSource {
 
         search_result.ok()
     }
+
+    fn sync(&mut self) {
+        // Process all async operations
+        let ops: Vec<_> = self.op_recv.try_iter().collect();
+        for op in ops {
+            match op {
+                LoadFileMetadata(file_metadata) => {
+                    debug!("Loaded file metadata for {:?}", file_metadata.0);
+                    self.load(file_metadata.0, file_metadata.1, file_metadata.2);
+                }
+            }
+        }
+
+        // Check for file changes and reload if necessary
+        if let Ok(watch_result) = self.watcher_recv.try_recv() {
+            if let Ok(watch_event) = watch_result {
+                debug!("Change for watched file: {:?}", watch_event.kind);
+                self.load_async();
+            }
+        }
+    }
 }
 
 ///
 
 struct FilteredFileLogSource {
-    arc_weak: Weak<Mutex<FilteredFileLogSource>>,
     file_log_source: Arc<Mutex<FileLogSource>>,
     file_path: PathBuf,
     search_query: String,
@@ -272,16 +324,13 @@ impl FilteredFileLogSource {
         search_query: String,
         search_options: SearchOptions,
     ) -> Arc<Mutex<FilteredFileLogSource>> {
-        let log_source = Arc::new_cyclic(|weak| {
-            Mutex::new(FilteredFileLogSource {
-                arc_weak: weak.clone(),
-                file_log_source: FileLogSource::open(&file_path).unwrap(),
-                file_path,
-                search_query,
-                search_options,
-                search_results: vec![],
-            })
-        });
+        let log_source = Arc::new(Mutex::new(FilteredFileLogSource {
+            file_log_source: FileLogSource::open(&file_path).unwrap(),
+            file_path,
+            search_query,
+            search_options,
+            search_results: vec![],
+        }));
 
         log_source.lock().unwrap().load_results();
 
@@ -394,5 +443,10 @@ impl LogSource for FilteredFileLogSource {
             });
 
         search_result.ok()
+    }
+
+    fn sync(&mut self) {
+        let mut source = self.file_log_source.lock().unwrap();
+        source.sync();
     }
 }

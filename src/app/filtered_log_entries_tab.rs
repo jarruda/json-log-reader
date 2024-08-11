@@ -137,9 +137,12 @@ impl LogViewTabTrait for FilteredLogEntriesTab {
         */
 
         if let Some(ref filtered_source) = self.filtered_source {
+            let mut filtered_source = filtered_source.lock().unwrap();
+            filtered_source.sync();
+            
             self.log_entries_table.ui(
                 ui,
-                filtered_source.lock().unwrap().deref_mut(),
+                filtered_source.deref_mut(),
                 viewer_state,
                 |ui| {
                     if ui

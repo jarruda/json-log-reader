@@ -124,4 +124,6 @@ pub trait LogSource {
     ) -> Arc<Mutex<dyn LogSource>>;
 
     fn find_entry_index(&mut self, entry_id: &LogEntryId) -> Option<usize>;
+
+    fn sync(&mut self);
 }

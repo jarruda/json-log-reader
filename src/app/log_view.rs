@@ -202,22 +202,11 @@ impl LogView {
     }
 
     pub fn ui(self: &mut Self, ui: &mut Ui) {
-        // TODO: async log source synchronization point
-        /*
-        if self.log_view_context.log_file_reader.has_changed() {
-            info!(
-                "File updated, reloading. {:?}",
-                self.log_view_context.log_file_path
-            );
-            let load_result = self.log_view_context.log_file_reader.load();
-            if let Err(e) = load_result {
-                error!(
-                    "Failed to reload file. file: {:?} error: {:?}",
-                    self.log_view_context.log_file_path, e
-                );
-            }
+        // async log source synchronization point
+        {
+            let mut ls = self.log_view_context.log_source.lock().unwrap();
+            ls.sync();
         }
-        */
 
         // Show all tabs
         DockArea::new(&mut self.tree)
