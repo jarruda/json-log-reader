@@ -84,12 +84,12 @@ impl FileLogSource {
             op_recv: op_rx,
             op_send: op_tx,
         }));
-        
+
         log_source.lock().unwrap().load_async();
 
         Ok(log_source)
     }
-    
+
     /// Reads the entire file to count the number of lines.
     /// Caches a map of line numbers to file positions.
     /// Returns the number of lines in the file if successful, error otherwise.
@@ -125,7 +125,7 @@ impl FileLogSource {
     fn load_async(&mut self) {
         let file_pathbuf = self.file_path.clone();
         let op_tx = self.op_send.clone();
-        
+
         thread::spawn(move || match Self::load_line_map(&file_pathbuf) {
             Ok((file, line_map, load_time)) => {
                 if let Err(e) = op_tx.send(LoadFileMetadata((file, line_map, load_time))) {
@@ -137,7 +137,7 @@ impl FileLogSource {
             }
         });
     }
-    
+
     pub fn load(&mut self, file: File, line_map: Vec<FileOffset>, load_time: Duration) {
         self.file_reader = Some(BufReader::new(file));
         self.line_map = line_map;
@@ -148,29 +148,25 @@ impl FileLogSource {
     /// Reads a line from the file parsed as a UTF8 string
     pub fn read_line(&mut self, line_num: LineNumber) -> Option<String> {
         let (file_start_offset, file_end_offset) = self.line_file_offsets(line_num);
-        
+
         let file_reader = self.file_reader.as_mut()?;
-        file_reader
-            .seek(SeekFrom::Start(file_start_offset))
-            .ok()?;
+        file_reader.seek(SeekFrom::Start(file_start_offset)).ok()?;
 
         self.read_line_buffer.clear();
         self.read_line_buffer
             .resize((file_end_offset - file_start_offset) as usize, 0);
-        file_reader
-            .read_exact(&mut self.read_line_buffer)
-            .ok()?;
+        file_reader.read_exact(&mut self.read_line_buffer).ok()?;
 
         Some(String::from_utf8_lossy(&self.read_line_buffer).to_string())
     }
 
     /// Reads a line from the file parsed as a UTF8 string
-    pub fn read_line_from_offset(
+    fn read_line_from_offset(
         reader: &mut BufReader<File>,
-        file_offset: &FileOffset,
+        file_offset: FileOffset,
         line_buffer: &mut Vec<u8>,
     ) -> Option<String> {
-        reader.seek(SeekFrom::Start(*file_offset)).ok()?;
+        reader.seek(SeekFrom::Start(file_offset)).ok()?;
 
         line_buffer.clear();
         reader.read_until(b'\n', line_buffer).ok()?;
@@ -181,7 +177,7 @@ impl FileLogSource {
     /// Parses a JSON object from the given string slice
     /// Format is <json-object>\n
     /// e.g. { "t": "2023-06-25T00:49:20Z", "message": "hello, world" }
-    pub fn parse_logline(line: &str) -> Option<LogEntry> {
+    fn parse_logline(line: &str) -> Option<LogEntry> {
         let log_entry = json::parse(line).ok()?;
 
         if log_entry.is_object() {
@@ -189,6 +185,16 @@ impl FileLogSource {
         } else {
             None
         }
+    }
+
+    fn entry_id_from_file_offset(
+        file_reader: &mut BufReader<File>,
+        line_buffer: &mut Vec<u8>,
+        file_offset: FileOffset,
+    ) -> Option<LogEntryId> {
+        let line = Self::read_line_from_offset(file_reader, file_offset, line_buffer);
+        let entry = Self::parse_logline(line.as_ref()?);
+        Some(LogEntryId::from(entry.as_ref()?))
     }
 
     /// Returns the file offset of the beginning of the given line number
@@ -265,25 +271,38 @@ impl LogSource for FileLogSource {
         FilteredFileLogSource::new(self.file_path.clone(), search_query, search_options)
     }
 
-    fn find_entry_index(&mut self, entry_id: &LogEntryId) -> Option<usize> {
+    fn find_entry_index(&mut self, entry_id_needle: &LogEntryId) -> Option<usize> {
         let file_reader = self.file_reader.as_mut()?;
-        let search_result = self.line_map.binary_search_by_key(entry_id, |file_offset| {
-            let line = Self::read_line_from_offset(
+
+        let partition_idx = self.line_map.partition_point(|file_offset| {
+            let entry_id = Self::entry_id_from_file_offset(
                 file_reader,
-                file_offset,
                 &mut self.read_line_buffer,
+                *file_offset,
             );
-            let entry = match line {
-                None => None,
-                Some(ref line) => Self::parse_logline(line),
-            };
-            match entry {
-                None => Default::default(),
-                Some(ref entry) => entry.into(),
+            match entry_id {
+                None => false,
+                Some(entry_id) => entry_id < *entry_id_needle,
             }
         });
 
-        search_result.ok()
+        let mut search_idx = partition_idx;
+        while let Some(file_offset) = self.line_map.get(search_idx) {
+            let entry_id = Self::entry_id_from_file_offset(
+                file_reader,
+                &mut self.read_line_buffer,
+                *file_offset,
+            )?;
+            if *entry_id_needle == entry_id {
+                return Some(search_idx);
+            }
+            if entry_id > *entry_id_needle {
+                return None;
+            }
+            search_idx += 1;
+        }
+
+        None
     }
 
     fn sync(&mut self) {
